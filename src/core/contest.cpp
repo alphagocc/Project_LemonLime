@@ -169,7 +169,10 @@ void Contest::clearPath(const QString &curDir) {
 void Contest::judge(Contestant *contestant) {
 	emit contestantJudgingStart(contestant->getContestantName());
 
-	for (int i = 0; i < taskList.size(); i++) {
+	QThreadPool *threadPool = new QThreadPool;
+	threadPool->setMaxThreadCount(4);
+	auto f = [&](int i) {
+		qDebug() << i;
 		emit taskJudgingStarted(taskList[i]->getProblemTile());
 		auto *thread = new AssignmentThread();
 		connect(thread, &AssignmentThread::dialogAlert, this, &Contest::dialogAlert);
@@ -181,7 +184,7 @@ void Contest::judge(Contestant *contestant) {
 		thread->setSettings(settings);
 		thread->setTask(taskList[i]);
 		thread->setContestantName(contestant->getContestantName());
-		auto *eventLoop = new QEventLoop(this);
+		auto *eventLoop = new QEventLoop();
 		connect(thread, &AssignmentThread::finished, eventLoop, &QEventLoop::quit);
 		thread->start();
 		eventLoop->exec();
@@ -205,8 +208,12 @@ void Contest::judge(Contestant *contestant) {
 		                       taskList[i]->getTotalScore());
 		emit taskJudgingFinished();
 		delete thread;
+	};
+	for (int i = 0; i < taskList.size(); i++) {
+		auto func = [=]() { f(i); };
+		threadPool->start(func);
 	}
-
+	delete threadPool;
 	contestant->setJudgingTime(QDateTime::currentDateTime());
 	emit contestantJudgedDisplay(contestant->getContestantName(), contestant->getTotalScore(),
 	                             getTotalScore());
