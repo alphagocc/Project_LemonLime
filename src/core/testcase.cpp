@@ -1,13 +1,13 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  */
 #include "testcase.h"
-//
+#include "base/LemonUtils.hpp"
 #include "base/settings.h"
 
 TestCase::TestCase(QObject *parent) : QObject(parent) {}
@@ -106,6 +106,30 @@ void TestCase::deleteSingleCase(int index) {
 	outputFiles.removeAt(index);
 }
 
+int TestCase::writeToJson(QJsonObject &out) {
+	WRITE_JSON(out, fullScore);
+	WRITE_JSON(out, timeLimit);
+	WRITE_JSON(out, memoryLimit);
+
+	QStringList inputFiles = this->inputFiles;
+	for (auto &filename : inputFiles) {
+		filename.replace('/', QDir::separator());
+	}
+	for (int i : qAsConst(dependenceSubtask)) {
+		inputFiles.push_back(QString("%1_lemon_SUbtaskDEPENDENCE_fLAg").arg(i));
+	}
+
+	WRITE_JSON(out, inputFiles);
+
+	QStringList outputFiles = this->outputFiles;
+
+	for (auto &filename : inputFiles) {
+		filename.replace('/', QDir::separator());
+	}
+
+	WRITE_JSON(out, outputFiles);
+	return 0;
+}
 void TestCase::writeToStream(QDataStream &out) {
 	out << fullScore;
 	out << timeLimit;
@@ -130,6 +154,34 @@ void TestCase::writeToStream(QDataStream &out) {
 	out << _outputFiles;
 }
 
+int TestCase::readFromJson(const QJsonObject &in) {
+	READ_JSON(in, fullScore);
+	READ_JSON(in, timeLimit);
+	READ_JSON(in, memoryLimit);
+
+	QJsonArray inputFiles;
+	this->inputFiles.clear();
+	READ_JSON(in, inputFiles);
+	for (const auto &i : inputFiles) {
+		if (! i.isString())
+			return -1;
+		auto fileName = i.toString();
+		if (fileName.endsWith("_lemon_SUbtaskDEPENDENCE_fLAg")) {
+			int temp{0};
+			for (auto c : fileName) {
+				temp *= 10;
+				temp += c.toLatin1() ^ '0';
+			}
+			dependenceSubtask.push_back(temp);
+		} else {
+			fileName.replace('/', QDir::separator());
+			this->inputFiles.push_back(fileName);
+		}
+	}
+
+	READ_JSON(in, outputFiles);
+	return 0;
+}
 void TestCase::readFromStream(QDataStream &in) {
 	in >> fullScore;
 	in >> timeLimit;

@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -113,7 +113,7 @@ void ResultViewer::refreshViewer() {
 	setHorizontalHeaderLabels(headerList);
 	horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
 	QList<Contestant *> contestantList = curContest->getContestantList();
-	QList<QPair<int, QString>> sortList;
+	QList<std::pair<int, QString>> sortList;
 	QList<int> fullScore;
 	int sfullScore = curContest->getTotalScore();
 
@@ -166,7 +166,7 @@ void ResultViewer::refreshViewer() {
 			item(i, taskList.size() + 3)->setData(Qt::DisplayRole, double(totalUsedTime) / 1000);
 			item(i, taskList.size() + 4)
 			    ->setData(Qt::DisplayRole, judgingTime.toString("yyyy-MM-dd hh:mm:ss"));
-			sortList.append(qMakePair(-totalScore, contestantList[i]->getContestantName()));
+			sortList.append(std::make_pair(-totalScore, contestantList[i]->getContestantName()));
 		} else {
 			item(i, 2)->setText(tr("Invalid"));
 			item(i, taskList.size() + 3)->setText(tr("Invalid"));
@@ -221,10 +221,10 @@ void ResultViewer::judgeSelected() {
 		}
 	}
 
-	QList<QPair<QString, QSet<int>>> judgeList;
+	QList<std::pair<QString, QSet<int>>> judgeList;
 
 	for (QMap<QString, QSet<int>>::const_iterator i = mapping.constBegin(); i != mapping.constEnd(); ++i) {
-		judgeList.append(qMakePair(i.key(), i.value()));
+		judgeList.append(std::make_pair(i.key(), i.value()));
 	}
 
 	auto *dialog = new JudgingDialog(this);
@@ -261,10 +261,10 @@ void ResultViewer::judgeUnjudged() {
 		}
 	}
 
-	QList<QPair<QString, QSet<int>>> judgeList;
+	QList<std::pair<QString, QSet<int>>> judgeList;
 
 	for (QMap<QString, QSet<int>>::const_iterator i = mapping.constBegin(); i != mapping.constEnd(); ++i) {
-		judgeList.append(qMakePair(i.key(), i.value()));
+		judgeList.append(std::make_pair(i.key(), i.value()));
 	}
 
 	auto *dialog = new JudgingDialog(this);
@@ -291,10 +291,10 @@ void ResultViewer::judgeGrey() {
 		}
 	}
 
-	QList<QPair<QString, QSet<int>>> judgeList;
+	QList<std::pair<QString, QSet<int>>> judgeList;
 
 	for (QMap<QString, QSet<int>>::const_iterator i = mapping.constBegin(); i != mapping.constEnd(); ++i) {
-		judgeList.append(qMakePair(i.key(), i.value()));
+		judgeList.append(std::make_pair(i.key(), i.value()));
 	}
 
 	auto *dialog = new JudgingDialog(this);
@@ -323,10 +323,10 @@ void ResultViewer::judgeMagenta() {
 		}
 	}
 
-	QList<QPair<QString, QSet<int>>> judgeList;
+	QList<std::pair<QString, QSet<int>>> judgeList;
 
 	for (QMap<QString, QSet<int>>::const_iterator i = mapping.constBegin(); i != mapping.constEnd(); ++i) {
-		judgeList.append(qMakePair(i.key(), i.value()));
+		judgeList.append(std::make_pair(i.key(), i.value()));
 	}
 
 	auto *dialog = new JudgingDialog(this);

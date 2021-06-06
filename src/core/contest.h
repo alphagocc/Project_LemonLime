@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -41,7 +41,9 @@ class Contest : public QObject {
 	void refreshContestantList();
 	void deleteContestant(const QString &);
 	void writeToStream(QDataStream &);
+	void writeToJson(QJsonObject &);
 	void readFromStream(QDataStream &);
+	int readFromJson(const QJsonObject &);
 
   private:
 	QString contestTitle;

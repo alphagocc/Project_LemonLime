@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -54,7 +54,7 @@ class Compiler : public QObject {
 
 	void copyFrom(Compiler *);
 
-	void read(const QJsonObject &json);
+	int read(const QJsonObject &json);
 	void write(QJsonObject &json) const;
 
   private:

@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -36,8 +36,10 @@ class TestCase : public QObject {
 	bool checkDependenceSubtask(const QStringList &) const;
 	void addSingleCase(const QString &, const QString &);
 	void deleteSingleCase(int);
+	int writeToJson(QJsonObject &out);
 	void writeToStream(QDataStream &);
 	void readFromStream(QDataStream &);
+	int readFromJson(const QJsonObject &);
 	void clearDependenceSubtask();
 	void swapFiles(int, int);
 

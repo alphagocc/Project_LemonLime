@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -123,15 +123,15 @@ void AddTestCasesWizard::refreshButtonState() {
 void AddTestCasesWizard::getFiles(const QString &curDir, const QString &prefix, QStringList &files) {
 	QStringList list = QDir(curDir).entryList(QDir::Files);
 
-	for (int i = 0; i < list.size(); i++) {
-		list[i] = prefix + list[i];
+	for (auto &list_i : list) {
+		list_i = prefix + list_i;
 	}
 
 	files.append(list);
 	list = QDir(curDir).entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
 
-	for (int i = 0; i < list.size(); i++) {
-		getFiles(curDir + list[i] + QDir::separator(), prefix + list[i] + QDir::separator(), files);
+	for (const auto &i : list) {
+		getFiles(curDir + i + QDir::separator(), prefix + i + QDir::separator(), files);
 	}
 }
 
@@ -172,11 +172,10 @@ auto AddTestCasesWizard::getMatchedPart(const QString &str, const QString &patte
 				QString regExp = ui->argumentList->item(index, 1)->text();
 
 				for (int j = i; j < str.length(); j++) {
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
 					regExp = QRegularExpression::anchoredPattern(regExp);
 					if (QRegularExpression(regExp).match(str.mid(i, j - i + 1)).hasMatch()) {
-						if (QRegularExpression(QRegularExpression::anchoredPattern(
-						                           getFullRegExp(pattern.mid(pos + 3)) + "$"))
+						if (QRegularExpression(
+						        QRegularExpression::anchoredPattern(getFullRegExp(pattern.mid(pos + 3))))
 						        .match(str.mid(j + 1))
 						        .hasMatch()) {
 							result[index] = str.mid(i, j - i + 1);
@@ -184,15 +183,6 @@ auto AddTestCasesWizard::getMatchedPart(const QString &str, const QString &patte
 							break;
 						}
 					}
-#else
-					if (QRegExp(regExp).exactMatch(str.mid(i, j - i + 1))) {
-						if (QRegExp(getFullRegExp(pattern.mid(pos + 3))).exactMatch(str.mid(j + 1))) {
-							result[index] = str.mid(i, j - i + 1);
-							i = j;
-							break;
-						}
-					}
-#endif
 				}
 				pos += 2;
 			}
@@ -210,12 +200,9 @@ void AddTestCasesWizard::searchMatchedFiles() {
 	QString regExp = getFullRegExp(inputFilesPattern);
 
 	for (int i = 0; i < inputFiles.size(); i++) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-		if (! QRegularExpression(QRegularExpression::anchoredPattern(regExp)).match(inputFiles[i]).hasMatch())
-#else
-		if (! QRegExp(regExp).exactMatch(inputFiles[i]))
-#endif
-		{
+		if (! QRegularExpression(QRegularExpression::anchoredPattern(regExp))
+		          .match(inputFiles[i])
+		          .hasMatch()) {
 			inputFiles.removeAt(i);
 			i--;
 		}
@@ -224,14 +211,9 @@ void AddTestCasesWizard::searchMatchedFiles() {
 	regExp = getFullRegExp(outputFilesPattern);
 
 	for (int i = 0; i < outputFiles.size(); i++) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 		if (! QRegularExpression(QRegularExpression::anchoredPattern(regExp))
 		          .match(outputFiles[i])
-		          .hasMatch())
-#else
-		if (! QRegExp(regExp).exactMatch(outputFiles[i]))
-#endif
-		{
+		          .hasMatch()) {
 			outputFiles.removeAt(i);
 			i--;
 		}
@@ -242,16 +224,16 @@ void AddTestCasesWizard::searchMatchedFiles() {
 	QList<QStringList> inputFilesMatchedPart;
 	QList<QStringList> outputFilesMatchedPart;
 
-	for (int i = 0; i < inputFiles.size(); i++) {
-		inputFilesMatchedPart.append(getMatchedPart(inputFiles[i], inputFilesPattern));
+	for (auto &inputFile : inputFiles) {
+		inputFilesMatchedPart.append(getMatchedPart(inputFile, inputFilesPattern));
 	}
 
-	for (int i = 0; i < outputFiles.size(); i++) {
-		outputFilesMatchedPart.append(getMatchedPart(outputFiles[i], outputFilesPattern));
+	for (auto &outputFile : outputFiles) {
+		outputFilesMatchedPart.append(getMatchedPart(outputFile, outputFilesPattern));
 	}
 
 	QMultiMap<QString, int> loc;
-	QList<QPair<QString, QString>> singleCases;
+	QList<std::pair<QString, QString>> singleCases;
 	QList<QStringList> matchedPart;
 
 	// if(ui->outputFilesPattern->isEnabled()) {
@@ -262,14 +244,14 @@ void AddTestCasesWizard::searchMatchedFiles() {
 	for (int i = 0; i < outputFiles.size(); i++) {
 		if (loc.count(outputFilesMatchedPart[i].join("*")) > 0) {
 			int partner = loc.value(outputFilesMatchedPart[i].join("*"));
-			singleCases.append(qMakePair(inputFiles[partner], outputFiles[i]));
+			singleCases.append(std::make_pair(inputFiles[partner], outputFiles[i]));
 			matchedPart.append(outputFilesMatchedPart[i]);
 		}
 	}
 
 	/*} else {
 	    for (int i = 0; i < inputFiles.size(); i ++) {
-	            singleCases.append(qMakePair(inputFiles[i], QString("")));
+	            singleCases.append(std::make_pair(inputFiles[i], QString("")));
 	            matchedPart.append(inputFilesMatchedPart[i]);
 	    }
 	}*/

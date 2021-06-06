@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2019  Project LemonLime
+ * SPDX-FileCopyrightText: 2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -246,7 +246,7 @@ auto StatisticsBrowser::checkValid(QList<Task *> taskList, const QList<Contestan
 			bool isJudged = false;
 
 			try {
-				scoreList = i->getSocre(j);
+				scoreList = i->getScore(j);
 				resultList = i->getResult(j);
 				testCaseList = taskList[j]->getTestCaseList();
 				isJudged = i->getCheckJudged(j);
@@ -364,7 +364,7 @@ void StatisticsBrowser::refresh() {
 			if (j->getCompileState(i) != NoValidSourceFile)
 				numberSubmitted++;
 
-			TestcaseScoreList.append(j->getSocre(i));
+			TestcaseScoreList.append(j->getScore(i));
 			resultList.append(j->getResult(i));
 		}
 

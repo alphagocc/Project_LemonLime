@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -9,6 +9,7 @@
 
 #include "task.h"
 
+#include "base/LemonUtils.hpp"
 #include "base/compiler.h"
 #include "base/settings.h"
 #include "core/testcase.h"
@@ -240,7 +241,74 @@ auto Task::getTotalScore() const -> int {
 
 	return total;
 }
+int Task::writeToJson(QJsonObject &in) {
+	WRITE_JSON(in, problemTitle);
+	WRITE_JSON(in, sourceFileName);
+	WRITE_JSON(in, inputFileName);
+	WRITE_JSON(in, outputFileName);
+	WRITE_JSON(in, standardInputCheck);
+	WRITE_JSON(in, standardOutputCheck);
+	WRITE_JSON(in, taskType);
+	WRITE_JSON(in, subFolderCheck);
+	WRITE_JSON(in, comparisonMode);
+	WRITE_JSON(in, diffArguments);
+	WRITE_JSON(in, realPrecision);
+	auto specialJudge = this->specialJudge;
+	specialJudge.replace(QDir::separator(), '/');
+	WRITE_JSON(in, specialJudge);
+	if (taskType == Task::Interaction) {
+		auto interactor = this->interactor;
+		interactor.replace(QDir::separator(), '/');
+		WRITE_JSON(in, interactor);
+		auto grader = this->grader;
+		grader.replace(QDir::separator(), '/');
+		WRITE_JSON(in, grader);
+		WRITE_JSON(in, interactorName);
+	}
 
+	if (taskType == Task::Communication) {
+		auto sourceFilesPath = this->sourceFilesPath;
+		auto sourceFilesName = this->sourceFilesName;
+		for (auto &filePath : sourceFilesPath) {
+			filePath.replace(QDir::separator(), '/');
+		}
+		for (auto &fileName : sourceFilesName) {
+			fileName.replace(QDir::separator(), '/');
+		}
+		WRITE_JSON(in, sourceFilesPath);
+		WRITE_JSON(in, sourceFilesName);
+
+		auto graderFilesPath = this->graderFilesPath;
+		auto graderFilesName = this->graderFilesName;
+		for (auto &filePath : graderFilesPath) {
+			filePath.replace(QDir::separator(), '/');
+		}
+		for (auto &fileName : graderFilesName) {
+			fileName.replace(QDir::separator(), '/');
+		}
+		WRITE_JSON(in, graderFilesPath);
+		WRITE_JSON(in, graderFilesName);
+	}
+
+	QJsonObject compilerConfiguration;
+	for (auto [x, y] : this->compilerConfiguration.toStdMap()) {
+		compilerConfiguration[x] = y;
+	}
+	WRITE_JSON(in, compilerConfiguration);
+
+	WRITE_JSON(in, answerFileExtension);
+
+	QJsonArray testCases;
+
+	for (const auto &i : testCaseList) {
+		QJsonObject obj;
+		i->writeToJson(obj);
+		testCases.append(obj);
+	}
+
+	WRITE_JSON(in, testCases);
+	return 0;
+}
 void Task::writeToStream(QDataStream &out) {
 	out << problemTitle;
 	out << sourceFileName;
@@ -297,6 +365,78 @@ void Task::writeToStream(QDataStream &out) {
 	for (auto &i : testCaseList) {
 		i->writeToStream(out);
 	}
+}
+int Task::readFromJson(const QJsonObject &in) {
+	READ_JSON(in, problemTitle);
+	READ_JSON(in, sourceFileName);
+	READ_JSON(in, inputFileName);
+	READ_JSON(in, outputFileName);
+	READ_JSON(in, standardInputCheck);
+	READ_JSON(in, standardOutputCheck);
+	int taskType;
+	READ_JSON(in, taskType);
+	this->taskType = static_cast<TaskType>(taskType);
+	READ_JSON(in, subFolderCheck);
+	int comparisonMode;
+	READ_JSON(in, comparisonMode);
+	this->comparisonMode = static_cast<ComparisonMode>(comparisonMode);
+	READ_JSON(in, diffArguments);
+	READ_JSON(in, realPrecision);
+	READ_JSON(in, specialJudge);
+	specialJudge.replace('/', QDir::separator());
+	if (taskType == Task::Interaction) {
+		READ_JSON(in, interactor);
+		interactor.replace('/', QDir::separator());
+		READ_JSON(in, grader);
+		grader.replace('/', QDir::separator());
+		READ_JSON(in, interactorName);
+	}
+
+	if (taskType == Task::Communication) {
+		READ_JSON(in, sourceFilesPath);
+		READ_JSON(in, sourceFilesName);
+		for (auto &filePath : sourceFilesPath) {
+			filePath.replace('/', QDir::separator());
+		}
+
+		for (auto &fileName : sourceFilesName) {
+			fileName.replace('/', QDir::separator());
+		}
+
+		READ_JSON(in, graderFilesPath);
+		READ_JSON(in, graderFilesName);
+
+		for (auto &filePath : graderFilesPath) {
+			filePath.replace('/', QDir::separator());
+		}
+
+		for (auto &fileName : graderFilesName) {
+			fileName.replace('/', QDir::separator());
+		}
+	}
+
+	QJsonObject compilerConfiguration;
+	READ_JSON(in, compilerConfiguration);
+	for (const auto &i : compilerConfiguration.toVariantMap().toStdMap()) {
+		if (! i.second.canConvert(QMetaType::QString))
+			return -1;
+		this->compilerConfiguration[i.first] = i.second.toString();
+	}
+
+	READ_JSON(in, answerFileExtension);
+
+	testCaseList.clear();
+	QJsonArray testCases;
+	READ_JSON(in, testCases);
+	for (const auto &testCase : testCases) {
+		auto *newTestCase = new TestCase(this);
+		if (newTestCase->readFromJson(testCase.toObject()) == -1)
+			return -1;
+		newTestCase->setIndex(testCaseList.size() + 1);
+		testCaseList.append(newTestCase);
+	}
+
+	return 0;
 }
 
 void Task::readFromStream(QDataStream &in) {

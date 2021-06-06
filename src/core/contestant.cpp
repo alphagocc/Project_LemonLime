@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -9,12 +9,9 @@
 
 #include "contestant.h"
 
+#include "base/LemonUtils.hpp"
 #include "core/contest.h"
 #include <utility>
-
-#if QT_VERSION < QT_VERSION_CHECK(5, 13, 0)
-#define swapItemsAt swap
-#endif
 
 Contestant::Contestant(QObject *parent) : QObject(parent) {}
 
@@ -34,7 +31,7 @@ auto Contestant::getResult(int index) const -> const QList<QList<ResultState>> &
 
 auto Contestant::getMessage(int index) const -> const QList<QStringList> & { return message[index]; }
 
-auto Contestant::getSocre(int index) const -> const QList<QList<int>> & { return score[index]; }
+auto Contestant::getScore(int index) const -> const QList<QList<int>> & { return score[index]; }
 
 auto Contestant::getTimeUsed(int index) const -> const QList<QList<int>> & { return timeUsed[index]; }
 
@@ -179,7 +176,26 @@ auto Contestant::getTotalUsedTime() const -> int {
 
 	return total;
 }
-
+int Contestant::writeToJson(QJsonObject &out) {
+	WRITE_JSON(out, contestantName);
+	WRITE_JSON(out, checkJudged);
+	WRITE_JSON(out, sourceFile);
+	WRITE_JSON(out, compileMesaage);
+	WRITE_JSON(out, inputFiles);
+	WRITE_JSON(out, message);
+	WRITE_JSON(out, score);
+	WRITE_JSON(out, timeUsed);
+	WRITE_JSON(out, memoryUsed);
+	int judgingTime_date = judgingTime.date().toJulianDay();
+	int judgingTime_time = judgingTime.time().msecsSinceStartOfDay();
+	int judgingTime_timespec = judgingTime.timeSpec();
+	WRITE_JSON(out, judgingTime_date);
+	WRITE_JSON(out, judgingTime_time);
+	WRITE_JSON(out, judgingTime_timespec);
+	WRITE_JSON(out, compileState);
+	WRITE_JSON(out, result);
+	return 0;
+}
 void Contestant::writeToStream(QDataStream &out) {
 	out << contestantName;
 	out << checkJudged;
@@ -212,6 +228,29 @@ void Contestant::writeToStream(QDataStream &out) {
 			}
 		}
 	}
+}
+int Contestant::readFromJson(const QJsonObject &in) {
+	READ_JSON(in, contestantName);
+	READ_JSON(in, checkJudged);
+	READ_JSON(in, sourceFile);
+	READ_JSON(in, compileMesaage);
+	READ_JSON(in, inputFiles);
+	READ_JSON(in, message);
+	READ_JSON(in, score);
+	READ_JSON(in, timeUsed);
+	READ_JSON(in, memoryUsed);
+	int judgingTime_date = 0;
+	int judgingTime_time = 0;
+	int judgingTime_timespec = 0;
+	READ_JSON(in, judgingTime_date);
+	READ_JSON(in, judgingTime_time);
+	READ_JSON(in, judgingTime_timespec);
+	judgingTime =
+	    QDateTime(QDate::fromJulianDay(judgingTime_date), QTime::fromMSecsSinceStartOfDay(judgingTime_time),
+	              Qt::TimeSpec(judgingTime_timespec));
+	READ_JSON(in, compileState);
+	READ_JSON(in, result);
+	return 0;
 }
 
 void Contestant::readFromStream(QDataStream &in) {

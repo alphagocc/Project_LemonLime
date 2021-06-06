@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -24,12 +24,6 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-#define ENDL Qt::endl
-#else
-#define ENDL endl
-#endif
 
 ExportUtil::ExportUtil(QObject *parent) : QObject(parent) {}
 
@@ -135,7 +129,7 @@ auto ExportUtil::getContestantHtmlCode(Contest *contest, Contestant *contestant,
 		QList<QStringList> message = contestant->getMessage(i);
 		QList<QList<int>> timeUsed = contestant->getTimeUsed(i);
 		QList<QList<int>> memoryUsed = contestant->getMemoryUsed(i);
-		QList<QList<int>> score = contestant->getSocre(i);
+		QList<QList<int>> score = contestant->getScore(i);
 
 		for (int j = 0; j < inputFiles.size(); j++) {
 			for (int k = 0; k < inputFiles[j].size(); k++) {
@@ -266,15 +260,15 @@ void ExportUtil::exportHtml(QWidget *widget, Contest *contest, const QString &fi
 	       "text-align: center; verticle-align: middle;}</style>";
 	out << "<title>" << contest->getContestTitle() << " : " << tr("Contest Result") << "</title>";
 	out << "</head><body>";
-	QList<QPair<int, QString>> sortList;
+	QList<std::pair<int, QString>> sortList;
 
 	for (auto &i : contestantList) {
 		int totalScore = i->getTotalScore();
 
 		if (totalScore != -1) {
-			sortList.append(qMakePair(-totalScore, i->getContestantName()));
+			sortList.append(std::make_pair(-totalScore, i->getContestantName()));
 		} else {
-			sortList.append(qMakePair(1, i->getContestantName()));
+			sortList.append(std::make_pair(1, i->getContestantName()));
 		}
 	}
 
@@ -496,7 +490,7 @@ auto ExportUtil::getSmallerContestantHtmlCode(Contest *contest, Contestant *cont
 		QList<QStringList> message = contestant->getMessage(i);
 		QList<QList<int>> timeUsed = contestant->getTimeUsed(i);
 		QList<QList<int>> memoryUsed = contestant->getMemoryUsed(i);
-		QList<QList<int>> score = contestant->getSocre(i);
+		QList<QList<int>> score = contestant->getScore(i);
 
 		for (int j = 0; j < inputFiles.size(); j++) {
 			for (int k = 0; k < inputFiles[j].size(); k++) {
@@ -597,15 +591,15 @@ void ExportUtil::exportSmallerHtml(QWidget *widget, Contest *contest, const QStr
 	       "text-align: center; verticle-align: middle;}</style>";
 	out << "<title>" << contest->getContestTitle() << " : " << tr("Contest Result") << "</title>";
 	out << "</head><body>";
-	QList<QPair<int, QString>> sortList;
+	QList<std::pair<int, QString>> sortList;
 
 	for (auto &i : contestantList) {
 		int totalScore = i->getTotalScore();
 
 		if (totalScore != -1) {
-			sortList.append(qMakePair(-totalScore, i->getContestantName()));
+			sortList.append(std::make_pair(-totalScore, i->getContestantName()));
 		} else {
-			sortList.append(qMakePair(1, i->getContestantName()));
+			sortList.append(std::make_pair(1, i->getContestantName()));
 		}
 	}
 
@@ -695,15 +689,15 @@ void ExportUtil::exportCsv(QWidget *widget, Contest *contest, const QString &fil
 	QTextStream out(&file);
 	QList<Contestant *> contestantList = contest->getContestantList();
 	QList<Task *> taskList = contest->getTaskList();
-	QList<QPair<int, QString>> sortList;
+	QList<std::pair<int, QString>> sortList;
 
 	for (auto &i : contestantList) {
 		int totalScore = i->getTotalScore();
 
 		if (totalScore != -1) {
-			sortList.append(qMakePair(-totalScore, i->getContestantName()));
+			sortList.append(std::make_pair(-totalScore, i->getContestantName()));
 		} else {
-			sortList.append(qMakePair(1, i->getContestantName()));
+			sortList.append(std::make_pair(1, i->getContestantName()));
 		}
 	}
 
@@ -734,7 +728,7 @@ void ExportUtil::exportCsv(QWidget *widget, Contest *contest, const QString &fil
 		    << ",";
 	}
 
-	out << "\"" << tr("Total Score") << "\"" << ENDL;
+	out << "\"" << tr("Total Score") << "\"" << Qt::endl;
 
 	for (auto &i : sortList) {
 		Contestant *contestant = contest->getContestant(i.second);
@@ -758,9 +752,9 @@ void ExportUtil::exportCsv(QWidget *widget, Contest *contest, const QString &fil
 		int score = contestant->getTotalScore();
 
 		if (score != -1) {
-			out << "\"" << score << "\"" << ENDL;
+			out << "\"" << score << "\"" << Qt::endl;
 		} else {
-			out << "\"" << tr("Invalid") << "\"" << ENDL;
+			out << "\"" << tr("Invalid") << "\"" << Qt::endl;
 		}
 	}
 
@@ -783,19 +777,19 @@ void ExportUtil::exportXls(QWidget *widget, Contest *contest, const QString &fil
 	QApplication::setOverrideCursor(Qt::WaitCursor);
 	QList<Contestant *> contestantList = contest->getContestantList();
 	QList<Task *> taskList = contest->getTaskList();
-	QList<QPair<int, QString>> sortList;
+	QList<std::pair<int, QString>> sortList;
 
 	for (int i = 0; i < contestantList.size(); i++) {
 		int totalScore = contestantList[i]->getTotalScore();
 
 		if (totalScore != -1) {
-			sortList.append(qMakePair(-totalScore, contestantList[i]->getContestantName()));
+			sortList.append(std::make_pair(-totalScore, contestantList[i]->getContestantName()));
 		} else {
-			sortList.append(qMakePair(1, contestantList[i]->getContestantName()));
+			sortList.append(std::make_pair(1, contestantList[i]->getContestantName()));
 		}
 	}
 
-	qSort(sortList);
+	std::sort(sortList.begin(), sortList.end());
 	QMap<QString, int> rankList;
 
 	for (int i = 0; i < sortList.size(); i++) {

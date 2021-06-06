@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -10,12 +10,6 @@
 #include "compiler.h"
 //
 #include "base/LemonUtils.hpp"
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-#define QT_SkipEmptyParts Qt::SkipEmptyParts
-#else
-#define QT_SkipEmptyParts QString::SkipEmptyParts
-#endif
 
 Compiler::Compiler(QObject *parent) : QObject(parent) {
 	compilerType = Typical;
@@ -55,7 +49,7 @@ void Compiler::setCompilerType(Compiler::CompilerType type) { compilerType = typ
 void Compiler::setCompilerName(const QString &name) { compilerName = name; }
 
 void Compiler::setSourceExtensions(const QString &extensions) {
-	sourceExtensions = extensions.split(";", QT_SkipEmptyParts);
+	sourceExtensions = extensions.split(";", Qt::SkipEmptyParts);
 }
 
 void Compiler::setCompilerLocation(const QString &location) { compilerLocation = location; }
@@ -63,7 +57,7 @@ void Compiler::setCompilerLocation(const QString &location) { compilerLocation =
 void Compiler::setInterpreterLocation(const QString &location) { interpreterLocation = location; }
 
 void Compiler::setBytecodeExtensions(const QString &extensions) {
-	bytecodeExtensions = extensions.split(";", QT_SkipEmptyParts);
+	bytecodeExtensions = extensions.split(";", Qt::SkipEmptyParts);
 }
 
 void Compiler::setEnvironment(const QProcessEnvironment &env) { environment = env; }
@@ -122,57 +116,52 @@ void Compiler::copyFrom(Compiler *other) {
 	disableMemoryLimitCheck = other->getDisableMemoryLimitCheck();
 }
 
-void Compiler::read(const QJsonObject &json) {
+int Compiler::read(const QJsonObject &json) {
 
 	if (json.contains("compilerType") && json["compilerType"].isDouble())
 		compilerType = CompilerType(json["compilerType"].toInt());
 
-	READ_JSON_STR(compilerName)
-	READ_JSON_STR(compilerLocation)
-	READ_JSON_STR(interpreterLocation)
+	READ_JSON(json, compilerName);
+	READ_JSON(json, compilerLocation);
+	READ_JSON(json, interpreterLocation);
 
-	READ_JSON_STRLIST(sourceExtensions)
-	READ_JSON_STRLIST(bytecodeExtensions)
-	READ_JSON_STRLIST(configurationNames)
-	READ_JSON_STRLIST(compilerArguments)
-	READ_JSON_STRLIST(interpreterArguments)
+	READ_JSON(json, sourceExtensions);
+	READ_JSON(json, bytecodeExtensions);
+	READ_JSON(json, configurationNames);
+	READ_JSON(json, compilerArguments);
+	READ_JSON(json, interpreterArguments);
 
-	QStringList _environment;
-	if (json.contains("environment") && json["environment"].isString()) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-		_environment = json["environment"].toString().split(QLatin1Char(';'), Qt::SkipEmptyParts);
-#else
-		_environment = json["environment"].toString().split(QLatin1Char(';'), QString::SkipEmptyParts);
-#endif
-	}
+	QStringList environment;
+	READ_JSON(json, environment);
 
-	for (auto &i : _environment) {
+	for (auto &i : environment) {
 		int tmp = i.indexOf('=');
 		QString variable = i.mid(0, tmp);
 		QString value = i.mid(tmp + 1);
-		environment.insert(variable, value);
+		this->environment.insert(variable, value);
 	}
 
-	READ_JSON_DOUBLE(timeLimitRatio)
-	READ_JSON_DOUBLE(memoryLimitRatio)
-	READ_JSON_BOOL(disableMemoryLimitCheck)
+	READ_JSON(json, timeLimitRatio);
+	READ_JSON(json, memoryLimitRatio);
+	READ_JSON(json, disableMemoryLimitCheck);
+	return 0;
 }
 
 void Compiler::write(QJsonObject &json) const {
-	WRITE_JSON(compilerType)
-	WRITE_JSON(compilerName)
-	WRITE_JSON(compilerLocation)
-	WRITE_JSON(interpreterLocation)
+	WRITE_JSON(json, compilerType);
+	WRITE_JSON(json, compilerName);
+	WRITE_JSON(json, compilerLocation);
+	WRITE_JSON(json, interpreterLocation);
 
-	WRITE_JSON_STRLIST(sourceExtensions)
-	WRITE_JSON_STRLIST(bytecodeExtensions)
-	WRITE_JSON_STRLIST(configurationNames)
-	WRITE_JSON_STRLIST(compilerArguments)
-	WRITE_JSON_STRLIST(interpreterArguments)
+	WRITE_JSON(json, sourceExtensions);
+	WRITE_JSON(json, bytecodeExtensions);
+	WRITE_JSON(json, configurationNames);
+	WRITE_JSON(json, compilerArguments);
+	WRITE_JSON(json, interpreterArguments);
 
-	WRITE_JSON_STRLIST(environment.toStringList())
+	WRITE_JSON(json, environment.toStringList());
 
-	WRITE_JSON(timeLimitRatio)          // double
-	WRITE_JSON(memoryLimitRatio)        // double
-	WRITE_JSON(disableMemoryLimitCheck) // bool
+	WRITE_JSON(json, timeLimitRatio);          // double
+	WRITE_JSON(json, memoryLimitRatio);        // double
+	WRITE_JSON(json, disableMemoryLimitCheck); // bool
 }

@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -12,7 +12,7 @@
 
 #include <QMainWindow>
 #include <QtCore>
-#include <QtGui>
+#include <QtWidgets>
 
 namespace Ui {
 	class LemonLime;
@@ -42,6 +42,7 @@ class LemonLime : public QMainWindow {
 	QSignalMapper *signalMapper;
 	QMenu *TaskMenu;
 	QList<QAction *> TaskList;
+	QTimer autoSaveTimer;
 	void judgeExtButtonFlip(bool);
 	void loadUiLanguage();
 	void insertWatchPath(const QString &, QFileSystemWatcher *);
@@ -49,9 +50,9 @@ class LemonLime : public QMainWindow {
 	void saveContest(const QString &);
 	void loadContest(const QString &);
 	static void getFiles(const QString &, const QStringList &, QMap<QString, QString> &);
-	void addTask(const QString &, const QList<QPair<QString, QString>> &, int, int, int);
-	void addTaskWithScoreScale(const QString &, const QList<QPair<QString, QString>> &, int, int, int);
-	static bool compareFileName(const QPair<QString, QString> &, const QPair<QString, QString> &);
+	void addTask(const QString &, const QList<std::pair<QString, QString>> &, int, int, int);
+	void addTaskWithScoreScale(const QString &, const QList<std::pair<QString, QString>> &, int, int, int);
+	static bool compareFileName(const std::pair<QString, QString> &, const std::pair<QString, QString> &);
 
   private slots:
 	void summarySelectionChanged();

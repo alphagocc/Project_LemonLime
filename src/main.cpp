@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -25,13 +25,7 @@ int main(int argc, char *argv[]) {
 	QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
 #endif
 
-	LemonBaseApplication app(argc, argv);
-
-	LOG("LemonLime " LEMON_VERSION_STRING " on " + QSysInfo::prettyProductName() + " " +
-	    QSysInfo::currentCpuArchitecture());
-	DEBUG("LemonLime Start Time: " + QString::number(QTime::currentTime().msecsSinceStartOfDay()));
-	DEBUG(LEMON_BUILD_INFO);
-	DEBUG(LEMON_BUILD_EXTRA_INFO);
+	Lemon::LemonBaseApplication app(argc, argv);
 
 	app.Initialize();
 

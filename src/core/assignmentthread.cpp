@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2011-2018 Project Lemon, Zhipeng Jia
  *                         2018-2019 Project LemonPlus, Dust1404
- *                         2019      Project LemonLime
+ *                         2019-2021 Project LemonLime
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -18,12 +18,6 @@
 #include "core/task.h"
 #include "core/testcase.h"
 #include <utility>
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-#define QT_SkipEmptyParts Qt::SkipEmptyParts
-#else
-#define QT_SkipEmptyParts QString::SkipEmptyParts
-#endif
 
 AssignmentThread::AssignmentThread(QObject *parent) : QThread(parent) {
 	moveToThread(this);
@@ -220,7 +214,7 @@ auto AssignmentThread::traditionalTaskPrepare() -> bool {
 						// TODO: 需要重构代码来处理含空格路径问题
 
 						compiler->start(i->getCompilerLocation(),
-						                arguments.split(QLatin1Char(' '), QT_SkipEmptyParts));
+						                arguments.split(QLatin1Char(' '), Qt::SkipEmptyParts));
 
 						if (! compiler->waitForStarted(-1)) {
 							compileState = InvalidCompiler;
@@ -401,7 +395,7 @@ void AssignmentThread::assign() {
 
 	if (overallStatus[curTestCaseIndex] < 0 || isSkipped) {
 		overallStatus[curTestCaseIndex] = -1;
-		taskSkipped(qMakePair(curTestCaseIndex, curSingleCaseIndex++));
+		taskSkipped(std::make_pair(curTestCaseIndex, curSingleCaseIndex++));
 		return;
 	}
 
@@ -469,13 +463,13 @@ void AssignmentThread::assign() {
 		}
 	}
 
-	running[thread] = qMakePair(curTestCaseIndex, curSingleCaseIndex++);
+	running[thread] = std::make_pair(curTestCaseIndex, curSingleCaseIndex++);
 	thread->start();
 }
 
 void AssignmentThread::makeDialogAlert(QString msg) { emit dialogAlert(std::move(msg)); }
 
-void AssignmentThread::taskSkipped(const QPair<int, int> &cur) {
+void AssignmentThread::taskSkipped(const std::pair<int, int> &cur) {
 	++countFinished;
 	emit singleCaseFinished(task->getTestCase(cur.first)->getTimeLimit(), cur.first, cur.second,
 	                        int(result[cur.first][cur.second]), 0, 0, 0);
@@ -498,7 +492,7 @@ void AssignmentThread::threadFinished() {
 	if (thread->getNeedRejudge() && thread->getJudgeTimes() != settings->getRejudgeTimes() + 1) {
 		thread->start();
 	} else {
-		QPair<int, int> cur = running[thread];
+		std::pair<int, int> cur = running[thread];
 		timeUsed[cur.first][cur.second] = thread->getTimeUsed();
 		memoryUsed[cur.first][cur.second] = thread->getMemoryUsed();
 		score[cur.first][cur.second] = thread->getScore();
