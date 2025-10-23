@@ -1,12 +1,20 @@
 # Active Context - 当前工作上下文
 
 ## 当前工作重点
+### 成绩导出功能重构
+- [ ] 分析现有exportutil.cpp实现
+- [ ] 设计最小化改动方案
+- [ ] 重构HTML生成逻辑
+- [ ] 优化代码结构和可维护性
+- [ ] 保持原始配色方案
+- [ ] 生成单文件HTML输出
+
 ### 记忆库初始化
 - [x] 创建项目基础文档 (projectbrief.md)
 - [x] 创建产品背景文档 (productContext.md) 
-- [ ] 创建系统架构文档 (systemPatterns.md)
-- [ ] 创建技术上下文文档 (techContext.md)
-- [ ] 创建进度跟踪文档 (progress.md)
+- [x] 创建系统架构文档 (systemPatterns.md)
+- [x] 创建技术上下文文档 (techContext.md)
+- [x] 创建进度跟踪文档 (progress.md)
 
 ### 项目状态概览
 **当前阶段**：记忆库初始化阶段
