@@ -7,9 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 查找 Qt 和其他依赖
-find_package(Qt6 COMPONENTS Test Core Gui Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Test Core Gui Widgets Network REQUIRED)
 # 或者使用 Qt5（基于主项目配置）
-# find_package(Qt5 COMPONENTS Test Core Gui Widgets REQUIRED)
+# find_package(Qt5 COMPONENTS Test Core Gui Widgets Network REQUIRED)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
@@ -45,6 +45,7 @@ foreach(TEST_CLASS ${TEST_CLASSES})
             Qt::Core
             Qt::Gui
             Qt::Widgets
+            Qt::Network
             lemon-core
             lemon-base
             spdlog::spdlog
