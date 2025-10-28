@@ -443,8 +443,6 @@ void JudgingDialog::stopJudgingSlot() {
 	emit stopJudgingSignal();
 }
 
-bool skipEnabled;
-
 void JudgingDialog::skipJudging() { skipEnabled = true; }
 
 void JudgingDialog::reject() { stopJudgingSlot(); }

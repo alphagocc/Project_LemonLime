@@ -181,6 +181,24 @@ include(cmake/lemon-base.cmake)
 include(cmake/lemon-core.cmake)
 
 # ==================================================================================
+# Lemon Tests
+# ==================================================================================
+
+option(ENABLE_TESTS "Enable unit tests" OFF)
+if(ENABLE_TESTS)
+    # 查找 Qt Test 模块
+    if(LEMON_QT6)
+        find_package(Qt6 COMPONENTS Test REQUIRED)
+    else()
+        find_package(Qt5 COMPONENTS Test REQUIRED)
+    endif()
+
+    # 添加测试子目录
+    enable_testing(true)
+    add_subdirectory(tests/core)
+endif()
+
+# ==================================================================================
 # Lemon Documents
 # ==================================================================================
 

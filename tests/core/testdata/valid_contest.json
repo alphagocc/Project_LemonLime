@@ -1,0 +1,62 @@
+{
+  "contestTitle": "Test Contest",
+  "tasks": [
+    {
+      "problemTitle": "A+B Problem",
+      "sourceFileName": "main.cpp",
+      "inputFileName": "input.txt",
+      "outputFileName": "output.txt",
+      "taskType": 0,
+      "comparisonMode": 1,
+      "diffArguments": "--ignore-space-change --text --brief",
+      "realPrecision": 3,
+      "standardInputCheck": false,
+      "standardOutputCheck": false,
+      "subFolderCheck": false,
+      "specialJudge": "",
+      "interactor": "",
+      "interactorName": "",
+      "grader": "",
+      "compilerConfiguration": {
+        "gcc": "g++ -std=c++17 -O2 -pipe -static -s",
+        "g++": "g++ -std=c++17 -O2 -pipe -static -s"
+      },
+      "answerFileExtension": ".out",
+      "sourceFilesPath": [],
+      "sourceFilesName": [],
+      "graderFilesPath": [],
+      "graderFilesName": [],
+      "testCaseList": [
+        {
+          "index": 0,
+          "fullScore": 100,
+          "timeLimit": 1000,
+          "memoryLimit": 256,
+          "inputFiles": ["1.txt"],
+          "outputFiles": ["1.out"],
+          "dependenceSubtask": []
+        }
+      ]
+    }
+  ],
+  "contestants": [
+    {
+      "contestantName": "TestUser",
+      "taskResults": [
+        {
+          "checkJudged": true,
+          "compileState": 0,
+          "sourceFile": "main.cpp",
+          "compileMessage": "",
+          "inputFiles": [["1.txt"]],
+          "result": [[0]],
+          "message": [["Accepted"]],
+          "score": [[100]],
+          "timeUsed": [[10]],
+          "memoryUsed": [[2048]]
+        }
+      ],
+      "judgingTime": "2025-01-01T00:00:00"
+    }
+  ]
+}

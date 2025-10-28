@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Qt/Docs/Qt-6.9.3/qttestlib/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
