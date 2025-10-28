@@ -25,6 +25,26 @@
   - 影响：跨平台文件路径读取错误
   - 解决：更正遍历容器为outputFiles
 
+### 0.6. 构建系统改进 🔧 (2025-10-28)
+- [x] 修改 buildversion 生成机制（使用 git commit hash 替代自增数字）
+  - 修改 CMakeLists.txt:111-145 添加 git commit hash 获取逻辑
+  - 使用 `find_package(Git)` 或直接执行 `git rev-parse --short HEAD`
+  - 添加 fallback 处理：当 git 不可用时使用 "no-git"
+  - 更新第 127 行：`add_definitions(-DLEMON_VERSION_BUILD=${BUILD_VERSION})`
+- [x] 修改 hooks/pre-commit 移除自增逻辑
+  - 简化为仅输出提示信息："Using git commit hash for build version"
+- [x] 更新 resource.qrc 移除 BUILDVERSION 文件引用
+  - 删除 "/asset" 部分中的 `makespec/BUILDVERSION` 条目
+- 好处：
+  - 每个构建自动对应唯一的 git commit
+  - 无需手动维护版本号
+  - 避免版本号冲突和同步问题
+- [x] 修复编译错误（宏定义缺少引号）
+  - lemon.cpp:1002 修复语法错误：`(QString text;` → `QString text;`
+  - lemon.cpp:1006 修改：`QString::number(LEMON_VERSION_BUILD)` → `QString(LEMON_VERSION_BUILD)`
+  - CMakeLists.txt:159 修改：`add_definitions(-DLEMON_VERSION_BUILD=${BUILD_VERSION})` → `add_definitions(-DLEMON_VERSION_BUILD="${BUILD_VERSION}")`
+  - 原因：git commit hash 是字符串而非数字，需要正确处理字符串类型
+
 ### 2. 项目定位明确 ✅
 - [x] 确认为离线竞赛编程评测系统
 - [x] 明确支持Qt 5.15和6.2版本
