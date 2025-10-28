@@ -906,26 +906,14 @@ void JudgingThread::runProgram() {
 	auto *runner = new QProcess(this);
 	QStringList argumentsList;
 
-	argumentsList << "--ro-bind"
-	              << "/usr"
-	              << "/usr";
-	argumentsList << "--symlink"
-	              << "/usr/lib"
-	              << "/lib";
-	argumentsList << "--symlink"
-	              << "/usr/lib64"
-	              << "/lib64";
-	argumentsList << "--symlink"
-	              << "/usr/bin"
-	              << "/bin";
-	argumentsList << "--symlink"
-	              << "/usr/sbin"
-	              << "/sbin";
-	argumentsList << "--tmpfs"
-	              << "/tmp";
+	argumentsList << "--ro-bind" << "/usr" << "/usr";
+	argumentsList << "--symlink" << "/usr/lib" << "/lib";
+	argumentsList << "--symlink" << "/usr/lib64" << "/lib64";
+	argumentsList << "--symlink" << "/usr/bin" << "/bin";
+	argumentsList << "--symlink" << "/usr/sbin" << "/sbin";
+	argumentsList << "--tmpfs" << "/tmp";
 
-	argumentsList << "--unshare-all"
-	              << "--die-with-parent";
+	argumentsList << "--unshare-all" << "--die-with-parent";
 
 	argumentsList << "--chdir" << workingDirectory;
 
@@ -954,7 +942,7 @@ void JudgingThread::runProgram() {
 	}
 
 	argumentsList << "_tmperr";
-	argumentsList << QString("%1").arg(timeLimit + extraTime);
+	argumentsList << QString("%1").arg(timeLimit);
 	argumentsList << QString("%1").arg(memoryLimit);
 	argumentsList << QString("%1").arg(rawTimeLimit);
 	argumentsList << QString("%1").arg(rawMemoryLimit);
@@ -1007,7 +995,7 @@ void JudgingThread::runProgram() {
 	}
 
 	argumentsList << "_tmperr";
-	argumentsList << QString("%1").arg(timeLimit + extraTime);
+	argumentsList << QString("%1").arg(timeLimit);
 	argumentsList << QString("%1").arg(memoryLimit);
 	argumentsList << QString("%1").arg(rawTimeLimit);
 	argumentsList << QString("%1").arg(rawMemoryLimit);
@@ -1044,7 +1032,10 @@ void JudgingThread::runProgram() {
 	QElapsedTimer timer;
 	timer.start();
 
-	while (timer.elapsed() <= timeLimit + extraTime) {
+	// Using rlimit to limit CPU time can only be accurate to seconds,
+	// so here it is rounded up to an integer second.
+	long long killTimeLimit = (timeLimit + 999) / 1000 * 1000 + extraTime;
+	while (timer.elapsed() <= killTimeLimit) {
 		if (runner->state() != QProcess::Running) {
 			isProgramFinishedInExtraTimeLimit = true;
 			break;
