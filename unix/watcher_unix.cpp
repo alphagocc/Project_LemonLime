@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <sys/fcntl.h>
+#include <sys/prlimit.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -160,24 +161,24 @@ auto main(int argc, char *argv[]) -> int {
 			exit(RS_FAIL);
 		}
 
-		rlimit memlim{}, stalim{}, timlim{};
+		rlimit64 memlim{}, stalim{}, timlim{};
 
 		if (memoryLimitMib > 0) {
-			memlim = (rlimit){(rlim_t)actualMemoryRLimit, (rlim_t)actualMemoryRLimit};
-			stalim = (rlimit){(rlim_t)actualMemoryRLimit, (rlim_t)actualMemoryRLimit};
+			memlim = (rlimit64){(rlim64_t)actualMemoryRLimit, (rlim64_t)actualMemoryRLimit};
+			stalim = (rlimit64){(rlim64_t)actualMemoryRLimit, (rlim64_t)actualMemoryRLimit};
 		} else {
 			// No memory limit specified, set to infinity
-			memlim = (rlimit){RLIM_INFINITY, RLIM_INFINITY};
-			stalim = (rlimit){(rlim_t)2147483647LL, (rlim_t)2147483647LL};
+			memlim = (rlimit64){RLIM64_INFINITY, RLIM64_INFINITY};
+			stalim = (rlimit64){(rlim64_t)2147483647LL, (rlim64_t)2147483647LL};
 		}
 
 		// Calculate time limit in seconds, rounding up
-		rlim_t soft_time_limit_sec = (timeLimitMs + 999) / 1000;
-		timlim = (rlimit){soft_time_limit_sec, soft_time_limit_sec + 1}; // Soft limit + 1 for hard limit
+		rlim64_t soft_time_limit_sec = (timeLimitMs + 999) / 1000;
+		timlim = (rlimit64){soft_time_limit_sec, soft_time_limit_sec + 1}; // Soft limit + 1 for hard limit
 
-		setrlimit(RLIMIT_AS, &memlim);
-		setrlimit(RLIMIT_STACK, &stalim);
-		setrlimit(RLIMIT_CPU, &timlim);
+		prlimit64(0, RLIMIT_AS, &memlim, nullptr);
+		prlimit64(0, RLIMIT_STACK, &stalim, nullptr);
+		prlimit64(0, RLIMIT_CPU, &timlim, nullptr);
 
 		if (execlp("bash", "bash", "-c", runCmd.c_str(), NULL) == -1) {
 			perror("execlp");
