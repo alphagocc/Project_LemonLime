@@ -113,4 +113,7 @@ User* findUser(int userId); // 可能返回 nullptr
 *   **`auto` 的使用**: 谨慎使用 `auto` 来提高代码的可读性，特别是在处理复杂的模板类型或迭代器时。但不要滥用，如果类型不明显，应显式写出。
 *   **`override` 和 `final`**: 明确使用 `override` 来标记覆盖的虚函数，使用 `final` 来防止进一步的继承或覆盖。
 
----
+## 3. 其他要求
+
+- 每次工作完成须 commit 代码，记忆库和代码分开提交，便于 cherry pick 到主分支
+- commit message 须简洁，精炼，不超过 1 行。
