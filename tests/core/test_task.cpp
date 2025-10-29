@@ -188,7 +188,7 @@ void TestTask::testComparisonMode_enumValues() {
 	QVERIFY(Task::ComparisonMode::IgnoreSpacesMode >= 0);
 	QVERIFY(Task::ComparisonMode::ExternalToolMode >= 0);
 	QVERIFY(Task::ComparisonMode::RealNumberMode >= 0);
-	QVERIFY(Task::ComparisonMode::SpecialJudgeMode >= 0);
+	QVERIFY(Task::ComparisonMode::LemonSpecialJudgeMode >= 0);
 }
 
 void TestTask::testSetAndGetTaskType() {
