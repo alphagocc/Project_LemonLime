@@ -14,7 +14,6 @@
 #include <sstream>
 #include <string>
 #include <sys/fcntl.h>
-#include <sys/prlimit.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
