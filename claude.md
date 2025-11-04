@@ -117,3 +117,7 @@ User* findUser(int userId); // 可能返回 nullptr
 
 - 每次工作完成须 commit 代码，记忆库和代码分开提交，便于 cherry pick 到主分支
 - commit message 须简洁，精炼，不超过 1 行。
+
+## 4. 约定
+
+- 编译目录在 ../build, 实现编译产物和代码的完全分离，不要在 workspace 内创建 build 文件夹
