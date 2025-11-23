@@ -12,9 +12,9 @@
 //
 #include "core/contest.h"
 //
+#include <QByteArrayView>
 #include <QFileDialog>
 #include <QJsonDocument>
-#include <QByteArrayView>
 OpenContestWidget::OpenContestWidget(QWidget *parent) : QWidget(parent), ui(new Ui::OpenContestWidget) {
 	ui->setupUi(this);
 	connect(ui->recentContest, &QTableWidget::itemSelectionChanged, this,
@@ -71,8 +71,7 @@ void OpenContestWidget::refreshContestList() {
 			char *raw = new char[len];
 			_in.readRawData(raw, len);
 
-			if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum)
-			{
+			if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum) {
 				delete[] raw;
 				recentContest.removeAt(i);
 				continue;
@@ -136,8 +135,7 @@ void OpenContestWidget::addContest() {
 		char *raw = new char[len];
 		in.readRawData(raw, len);
 
-		if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum)
-		{
+		if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum) {
 			QMessageBox::warning(this, tr("Error"), tr("Broken contest data file"), QMessageBox::Close);
 			delete[] raw;
 			return;

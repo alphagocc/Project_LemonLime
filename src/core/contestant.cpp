@@ -214,8 +214,8 @@ int Contestant::readFromJson(const QJsonObject &in) {
 	READ_JSON(in, judgingTime_date);
 	READ_JSON(in, judgingTime_time);
 	READ_JSON(in, judgingTime_timespec);
-	auto dt = QDateTime(QDate::fromJulianDay(judgingTime_date),
-	                    QTime::fromMSecsSinceStartOfDay(judgingTime_time));
+	auto dt =
+	    QDateTime(QDate::fromJulianDay(judgingTime_date), QTime::fromMSecsSinceStartOfDay(judgingTime_time));
 	if (judgingTime_timespec == Qt::UTC) {
 		dt.setTimeZone(QTimeZone::utc());
 	} else {

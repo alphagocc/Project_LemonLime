@@ -29,8 +29,8 @@
 #include "statisticsbrowser.h"
 #include "welcomedialog.h"
 //
-#include <QDesktopServices>
 #include <QByteArrayView>
+#include <QDesktopServices>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -677,8 +677,7 @@ void LemonLime::loadContest(const QString &filePath) {
 		char *raw = new char[len];
 		_in.readRawData(raw, len);
 
-		if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum)
-		{
+		if (qChecksum(QByteArrayView(raw, static_cast<uint>(len))) != checksum) {
 			QMessageBox::warning(this, tr("Error"),
 			                     tr("File %1 is broken").arg(QFileInfo(filePath).fileName()),
 			                     QMessageBox::Close);
