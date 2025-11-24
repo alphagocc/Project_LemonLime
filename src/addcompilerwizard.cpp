@@ -40,8 +40,8 @@ AddCompilerWizard::AddCompilerWizard(QWidget *parent) : QWizard(parent), ui(new 
 				return;
 			}
 
-			const auto located =
-			    QStandardPaths::locate(QStandardPaths::ApplicationsLocation, candidate, QStandardPaths::LocateFile);
+			const auto located = QStandardPaths::locate(QStandardPaths::ApplicationsLocation, candidate,
+			                                            QStandardPaths::LocateFile);
 			if (! located.isEmpty()) {
 				target->setText(QDir::toNativeSeparators(located));
 				return;
