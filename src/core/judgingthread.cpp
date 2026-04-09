@@ -482,7 +482,7 @@ void JudgingThread::lemonSpecialJudge(const QString &fileName) {
 	bool flag = false;
 
 	while (timer.elapsed() < specialJudgeTimeLimit) {
-		if (judge->state() != QProcess::Running) {
+		if (judge->waitForFinished(10)) {
 			flag = true;
 			break;
 		}
@@ -493,8 +493,6 @@ void JudgingThread::lemonSpecialJudge(const QString &fileName) {
 			judge->kill();
 			return;
 		}
-
-		msleep(10);
 	}
 
 	if (! flag) {
@@ -592,7 +590,7 @@ void JudgingThread::testlibSpecialJudge(const QString &fileName) {
 	bool flag = false;
 
 	while (timer.elapsed() < specialJudgeTimeLimit) {
-		if (judge->state() != QProcess::Running) {
+		if (judge->waitForFinished(10)) {
 			flag = true;
 			break;
 		}
@@ -603,8 +601,6 @@ void JudgingThread::testlibSpecialJudge(const QString &fileName) {
 			judge->kill();
 			return;
 		}
-
-		msleep(10);
 	}
 
 	if (! flag) {
