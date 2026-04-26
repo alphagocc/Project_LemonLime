@@ -879,8 +879,8 @@ void LemonLime::addTaskWithScoreScale(const QString &title,
 	}
 }
 
-auto LemonLime::compareFileName(const std::pair<QString, QString> &a,
-                                const std::pair<QString, QString> &b) -> bool {
+auto LemonLime::compareFileName(const std::pair<QString, QString> &a, const std::pair<QString, QString> &b)
+    -> bool {
 	return (a.first.length() < b.first.length()) ||
 	       (a.first.length() == b.first.length() && QString::localeAwareCompare(a.first, b.first) < 0);
 }
@@ -972,6 +972,7 @@ void LemonLime::exportStatistics() { StatisticsBrowser::exportStatistics(this, c
 void LemonLime::changeContestName() {
 	if (! curContest) {
 		QMessageBox::warning(this, tr("Rename Contest"), tr("No Contest Yet"));
+		return;
 	}
 
 	bool confirmed = false;
