@@ -197,6 +197,56 @@ class TestContest : public QObject {
 		delete contest;
 	}
 
+	void testReadCdfCompilerConfiguration_data() {
+		QTest::addColumn<QString>("savedConfiguration");
+		QTest::addColumn<QString>("expectedConfiguration");
+
+		QTest::newRow("missing-compiler") << QString() << QString("default");
+		QTest::newRow("missing-configuration") << QString("remote-only") << QString("default");
+		QTest::newRow("empty-configuration") << QString("") << QString("default");
+		QTest::newRow("default-configuration") << QString("default") << QString("default");
+		QTest::newRow("custom-configuration") << QString("custom") << QString("custom");
+		QTest::newRow("disabled-compiler") << QString("disable") << QString("disable");
+	}
+
+	void testReadCdfCompilerConfiguration() {
+		QFETCH(QString, savedConfiguration);
+		QFETCH(QString, expectedConfiguration);
+
+		QFile file(m_contestDir + "/TestContest1.cdf");
+		QVERIFY(file.open(QFile::ReadOnly));
+		QJsonParseError parseError;
+		QJsonObject contestJson = QJsonDocument::fromJson(file.readAll(), &parseError).object();
+		QCOMPARE(parseError.error, QJsonParseError::NoError);
+
+		QJsonObject compilerConfiguration{{"obsolete-compiler", "default"}};
+		if (! savedConfiguration.isNull())
+			compilerConfiguration.insert("g++", savedConfiguration);
+		QJsonArray tasks = contestJson["tasks"].toArray();
+		for (int i = 0; i < tasks.size(); i++) {
+			QJsonObject task = tasks[i].toObject();
+			task.insert("compilerConfiguration", compilerConfiguration);
+			tasks[i] = task;
+		}
+		contestJson["tasks"] = tasks;
+
+		Compiler compiler;
+		compiler.setCompilerName("g++");
+		compiler.addConfiguration("default", "%s.* -o %s", "");
+		compiler.addConfiguration("custom", "%s.* -o %s -O2", "");
+		Settings settings;
+		settings.addCompiler(&compiler);
+		Contest contest;
+		contest.setSettings(&settings);
+		QCOMPARE(contest.readFromJson(contestJson), 0);
+		QCOMPARE(contest.getTaskList().size(), tasks.size());
+
+		for (const Task *task : contest.getTaskList()) {
+			QCOMPARE(task->getCompilerConfiguration("g++"), expectedConfiguration);
+			QVERIFY(task->getCompilerConfiguration("obsolete-compiler").isEmpty());
+		}
+	}
+
 	// ------------------------------------------------------------------
 	// Test 2: get compiler path
 	// ------------------------------------------------------------------
