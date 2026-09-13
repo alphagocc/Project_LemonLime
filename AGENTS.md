@@ -5,7 +5,7 @@
 Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量级评测系统，基于 Lemon + LemonPlus 开发。支持 Linux、Windows、macOS 三平台。
 
 - **Qt 版本**: Qt 6.8 或更高（可通过 `-DLEMON_QT_MAJOR_VERSION=<6|7>` 指定主版本）
-- **Qt 模块**: Core, Gui, Widgets（核心），LinguistTools（翻译），AxContainer（仅 Windows XLS 导出）
+- **Qt 模块**: Core, Gui, Widgets（核心），Svg（图标插件），LinguistTools（翻译），AxContainer（仅 Windows XLS 导出）
 - **C++ 标准**: C++17（`CMAKE_CXX_STANDARD 17`，无扩展）
 - **第三方依赖**: SingleApplication（单实例保护），spdlog（日志系统），均作为 git submodule 在 `3rdparty/` 下
 - **许可证**: GPL-3.0-or-later
@@ -15,7 +15,7 @@ Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量�
 ### 依赖
 
 - CMake ≥ 3.16
-- Qt 6.8+（需要 Core, Gui, Widgets, LinguistTools 模块）
+- Qt 6.8+（需要 Core, Gui, Widgets, Svg, LinguistTools 模块）
 - C++17 兼容的编译器（MSVC / GCC / Clang）
 - Ninja（推荐）或 Make
 
@@ -178,6 +178,12 @@ delete taskJudger;
 - `translations/translations.qrc`：翻译文件（可嵌入或外置）
 - `manual/manual.qrc`：用户手册（可嵌入）
 - `unix/watcher.qrc`：watcher 二进制（仅 Unix）
+
+SVG 图标在 `assets/pics/` 中维护一份图形，资源别名使用 `.llsvg` 后缀，由静态 `LemonSvgIconPlugin` 创建自定义 `QIconEngine`。插件使用 XML 解析替换 `id="current-color-scheme"` 的 SVG 样式块；`ColorScheme-Text` 使用应用调色板，`ColorScheme-NegativeText` 使用集中管理的浅色与深色提示颜色，禁用和选中状态采用对应的调色板颜色。插件缓存配色后的 SVG，并按源码摘要、调色板、尺寸、状态和设备像素比缓存图像。代码位于 `src/plugins/lemonsvgiconplugin.cpp`，使用 Qt Svg 模块；`qt_add_plugin` 在链接时自动注册插件。
+
+新增图标须在专用样式块中声明上述颜色角色，图形使用 `currentColor`，并在 `resource.qrc` 中注册 `.llsvg` 别名，表单使用同一别名。专用样式块仅存放主题颜色声明，其他样式置于该样式块之外。普通 `.svg` 仍由 Qt 原生插件处理。图标绘制采用应用级调色板。
+
+图标插件参考 KIconThemes 的颜色角色和 XML 样式替换设计，采用独立实现，许可证为 `GPL-3.0-or-later`。参考版本、文件和上游许可证记录于 `src/plugins/README.md`；此次集成未引入 KDE 源码或库依赖。
 
 ### 国际化
 
