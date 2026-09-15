@@ -54,6 +54,9 @@ class TaskJudger : public QObject {
 	bool disableMemoryLimitCheck{};
 	bool interpreterAsWatcher{};
 	QProcessEnvironment environment;
+	SandboxSettings sandboxSettings;
+	QString runtimeExecutable;
+	QProcessEnvironment runtimeEnvironment;
 	QList<int> overallStatus;
 	QList<QList<int>> timeUsed;
 	QList<QList<qint64>> memoryUsed;

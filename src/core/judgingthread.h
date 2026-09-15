@@ -40,6 +40,8 @@ class JudgingThread : public QThread {
 	void setMemoryLimit(int);
 	void setRawMemoryLimit(int);
 	void setInterpreterAsWatcher(bool);
+	void setSandboxConfiguration(const SandboxSettings &, const QString &, const QProcessEnvironment &,
+	                             const std::shared_ptr<WindowsSandboxSession> &);
 	int getTimeUsed() const;
 	qint64 getMemoryUsed() const;
 	int getScore() const;
@@ -79,6 +81,10 @@ class JudgingThread : public QThread {
 	QString message;
 	std::atomic<bool> stopJudging{false};
 	bool interpreterAsWatcher{};
+	SandboxSettings sandboxSettings;
+	QString runtimeExecutable;
+	QProcessEnvironment runtimeEnvironment;
+	std::shared_ptr<WindowsSandboxSession> sandboxSession;
 	void compareLineByLine(const QString &);
 	void compareIgnoreSpaces(const QString &);
 	void compareWithDiff(const QString &);
@@ -93,4 +99,7 @@ class JudgingThread : public QThread {
 
   public slots:
 	void stopJudgingSlot();
+
+  signals:
+	void preparationProgress(const QString &message);
 };

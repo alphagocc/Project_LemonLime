@@ -8,11 +8,15 @@
 #pragma once
 
 #include "base/LemonType.hpp"
+#include "base/sandboxsettings.h"
 #include <QProcessEnvironment>
 #include <QString>
 #include <QtGlobal>
 #include <atomic>
+#include <functional>
 #include <memory>
+
+class WindowsSandboxSession;
 
 struct ProcessRunnerConfig {
 	QString executableFile;
@@ -30,6 +34,12 @@ struct ProcessRunnerConfig {
 	QString inputFileName;
 	QString outputFileName;
 	bool interpreterAsWatcher{};
+	SandboxSettings sandboxSettings;
+	// The trusted compiler/interpreter selected by the user, never a submission.
+	QString runtimeExecutable;
+	QProcessEnvironment runtimeEnvironment;
+	std::shared_ptr<WindowsSandboxSession> sandboxSession;
+	std::function<void(const QString &)> preparationProgress;
 };
 
 struct ProcessRunnerResult {
@@ -38,6 +48,9 @@ struct ProcessRunnerResult {
 	int timeUsed = -1;
 	qint64 memoryUsed = -1;
 	QString message;
+	qint64 preparationTime = 0;
+	int runtimeAclUpdates = 0;
+	bool runtimeCacheHit = false;
 };
 
 class ProcessRunner {

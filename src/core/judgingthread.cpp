@@ -80,6 +80,15 @@ void JudgingThread::setRawMemoryLimit(int limit) { rawMemoryLimit = limit; }
 
 void JudgingThread::setInterpreterAsWatcher(bool use) { interpreterAsWatcher = use; }
 
+void JudgingThread::setSandboxConfiguration(const SandboxSettings &settings, const QString &executable,
+                                            const QProcessEnvironment &environment,
+                                            const std::shared_ptr<WindowsSandboxSession> &session) {
+	sandboxSettings = settings;
+	runtimeExecutable = executable;
+	runtimeEnvironment = environment;
+	sandboxSession = session;
+}
+
 auto JudgingThread::getTimeUsed() const -> int { return timeUsed; }
 
 auto JudgingThread::getMemoryUsed() const -> qint64 { return memoryUsed; }
@@ -772,6 +781,11 @@ void JudgingThread::judgeTraditionalTask() {
 	cfg.inputFileName = task->getInputFileName();
 	cfg.outputFileName = task->getOutputFileName();
 	cfg.interpreterAsWatcher = interpreterAsWatcher;
+	cfg.sandboxSettings = sandboxSettings;
+	cfg.runtimeExecutable = runtimeExecutable;
+	cfg.runtimeEnvironment = runtimeEnvironment;
+	cfg.sandboxSession = sandboxSession;
+	cfg.preparationProgress = [this](const QString &text) { emit preparationProgress(text); };
 
 	auto processRunner = ProcessRunner::create(cfg, stopJudging);
 	auto runResult = processRunner->run();
