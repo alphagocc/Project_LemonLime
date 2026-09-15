@@ -132,6 +132,18 @@ Contest (QObject)
 
 在 Linux/macOS 平台，会编译一个单独的 `watcher_unix` 可执行文件（包含 `watcher_unix.cpp` + 平台相关的 `watcher_linux.cpp` 或 `watcher_macos.mm`），用于监控被评测程序的资源使用（时间/内存），嵌入 `watcher.qrc` 资源到主程序。
 
+### Windows Sandbox
+
+Windows AppContainer 沙箱作为实验性配置，默认关闭，按编译器显式启用。`SandboxSettings.enabled` 默认为 `false`，旧配置缺少该字段时同样关闭。两种模式共用 `WinProcessRunner::run()` 中的进程启动、监控、计量和错误处理。关闭时沿用原有进程环境；启用时由 `WindowsSandbox` 准备权限、AppContainer 属性和 Job，Job 用于进程数量限制和子进程回收。
+
+启用时，`WinProcessRunner` 在 AppContainer 中执行提交程序，使用独立 Package SID、私有工作目录、标准流句柄白名单和 Job Object。`WindowsSandbox` 根据 `SandboxSettings` 发现 C、C++、Java、Python 运行环境，使用 `QDir::canonicalPath()` 规范化配置的目录名，运行环境中的目录连接由 Windows 文件接口跟随。运行目录与比赛数据、工作目录可以重叠，程序按配置准备只读权限。运行环境授权及发现结果仅在当前活动评测会话的内存中复用。`TaskJudger::judge()` 持有会话，结束或取消后释放；并发任务共用会话，最后一个使用者退出时撤销本会话新增的运行环境授权。会话使用独立命名 capability SID，避免影响其他进程的授权。禁止对整个宿主 PATH 重复设置继承 ACL。
+
+运行目录的现有文件逐项授权；目录句柄使用 `MAXIMUM_ALLOWED` 抑制 `SetSecurityInfo` 的递归传播，文件句柄仅请求元数据和 DACL 权限，兼容正在使用的 DLL。运行环境与工作文件共用文件检查和权限设置实现，工作文件使用独立的受保护 DACL。首次准备默认预算 15 秒，支持进度和取消。运行环境授权逐项设置为非继承 ACE，并在内存中记录，以便完整撤销。准备与撤销通过进程内互斥锁协调；准备失败时撤销该阶段新增的授权。临时工作文件使用私有 DACL，进程结束后移除 Package SID 授权；工作目录由 `TaskJudger` 现有的 `QTemporaryDir` 生命周期统一删除，省去完整 DACL 快照及还原。运行环境和 Python 探测记录仅存在于会话内存中，禁止写入缓存文件或文件锁。Java 和 Python 的环境发现分别由独立函数实现，`discover()` 仅分派策略。Python 探测使用普通 QProcess，超时或取消返回时由其析构函数终止探测进程并等待退出；AppContainer、Job 和标准流句柄白名单仅用于提交程序。
+
+启用沙箱时，本机程序的 Job 最多允许一个进程，Java 和 Python 最多允许 16 个进程。两种执行模式均保留原有计量：返回主进程用户态时间与峰值工作集，内存限制检查主进程 `PrivateUsage` 与 `PeakWorkingSetSize` 的较大值。Job 不参与时间和内存计量，也不设置总内存配额。运行监控保留 10 毫秒等待间隔，输出结果判断保留在评测层。关闭标准流重定向时保留空句柄，继承白名单仅包含实际打开的标准流。AppContainer 和 Job 在创建进程时通过属性配置，沿用原有启动标志。Python 输出编码、用户包加载和字节码缓存遵循解释器默认行为及用户显式配置。取消返回值、运行错误信息和启动优先级沿用原有定义。沙箱功能应保持现有评测行为，其他行为调整须取得用户明确授权。编译阶段和检查器当前仍使用宿主权限。
+
+高级编译器设置提供默认未勾选的“实验性 Windows 沙箱”开关，启用后可以选择自动、本机程序、Java、Python 策略，额外只读目录和准备时间预算。配置通过 `Compiler` 的 JSON 字段 `windowsSandbox` 及 QSettings 的 `WindowsSandbox` 字段保存。
+
 ## Qt Conventions
 
 ### 信号槽风格
@@ -181,7 +193,7 @@ delete taskJudger;
 
 ### 国际化
 
-- 全面使用 `tr()` 和 `QObject::tr()` 进行翻译标记
+- 面向 GUI 的文本使用 `tr()` 和 `QObject::tr()` 标记；仅供日志使用的内部诊断保持普通字符串
 - 翻译文件：`translations/zh_CN.ts`、`translations/zh_TW.ts`、`translations/en_US.ts`
 - `LemonTranslator` 类管理翻译加载，搜索多个路径（含 Snap/AppImage 支持）
 - 非 QObject 类使用 `Q_DECLARE_TR_FUNCTIONS` 宏（如 `Settings`）
@@ -342,15 +354,16 @@ enum ResultState {
 
 ## Testing
 
-- **当前状态**: 项目 `tests/` 目录为空，`TODO` 文件中标注 "Need Test"
-- **无测试框架**: 目前未集成任何测试框架
+- **测试框架**: Qt Test，通过 CTest 执行
+- `tests/test1/` 包含比赛评测集成测试
+- `tests/windows-sandbox/` 包含 Windows 沙箱隔离、句柄、权限缓存、资源限制、取消和语言兼容测试，仅在 Windows 构建；C、C++、Python 和 Java 测试使用本机安装的工具，缺少对应工具时跳过该项
 - `unix/test/` 目录包含 watcher 相关的测试 CMakeLists 和测试程序
 
 ## Important Notes
 
 ### 平台兼容性
 
-- **Windows**: 推荐从源码构建而非直接使用 Release 二进制，以确保时间/内存检测功能正常。CI 使用 MSVC。
+- **Windows**: 实验性 AppContainer 沙箱默认关闭，可按编译器启用。启用时由 Job Object 限制进程数量并回收子进程，时间和内存保持原有主进程计量。CI 使用 MSVC。启用沙箱后的准备需要所选运行目录具有适当的读取与执行授权，或允许当前用户配置该授权；失败时报告原因并停止该次运行。
 - **macOS**: 需使用 `watcher_macos.mm`（Objective-C++）编译 watcher，否则内存限制功能异常。Apple Silicon 不保证评测稳定性。
 - **Linux**: 默认栈空间与内存限制相同。watcher 使用 `watcher_linux.cpp`。静态编译为推荐分发方式。
 
