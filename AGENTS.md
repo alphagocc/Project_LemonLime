@@ -34,19 +34,19 @@ cmake --build build --parallel
 
 ### CMake 选项
 
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `EMBED_TRANSLATIONS` | `ON` | 嵌入翻译文件到二进制 |
-| `EMBED_DOCS` | `ON` | 嵌入手册文档 |
-| `ENABLE_XLS_EXPORT` | `OFF` | XLS 导出支持（仅 Windows） |
-| `ENABLE_LTO` | `ON` | 链接时优化 |
-| `ENABLE_CCACHE` | `OFF` | ccache 加速编译 |
-| `BUILD_DEB` | `OFF` | 构建 DEB 包 |
-| `BUILD_RPM` | `OFF` | 构建 RPM 包 |
-| `LEMON_QT_MAJOR_VERSION` | `6` | Qt 主版本号 |
-| `LEMON_QT_MIN_VERSION` | `6.8` | 最低 Qt 版本 |
-| `LEMON_BUILD_INFO` | 空 | 自定义构建信息字符串 |
-| `LEMON_CONFIG_DIR` | 空 | 自定义配置目录 |
+| 选项                     | 默认值 | 说明                       |
+| ------------------------ | ------ | -------------------------- |
+| `EMBED_TRANSLATIONS`     | `ON`   | 嵌入翻译文件到二进制       |
+| `EMBED_DOCS`             | `ON`   | 嵌入手册文档               |
+| `ENABLE_XLS_EXPORT`      | `OFF`  | XLS 导出支持（仅 Windows） |
+| `ENABLE_LTO`             | `ON`   | 链接时优化                 |
+| `ENABLE_CCACHE`          | `OFF`  | ccache 加速编译            |
+| `BUILD_DEB`              | `OFF`  | 构建 DEB 包                |
+| `BUILD_RPM`              | `OFF`  | 构建 RPM 包                |
+| `LEMON_QT_MAJOR_VERSION` | `6`    | Qt 主版本号                |
+| `LEMON_QT_MIN_VERSION`   | `6.8`  | 最低 Qt 版本               |
+| `LEMON_BUILD_INFO`       | 空     | 自定义构建信息字符串       |
+| `LEMON_CONFIG_DIR`       | 空     | 自定义配置目录             |
 
 ### 版本信息
 
@@ -134,13 +134,19 @@ Contest (QObject)
 
 ### Windows Sandbox
 
-Windows AppContainer 沙箱作为实验性配置，默认关闭，按编译器显式启用。`SandboxSettings.enabled` 默认为 `false`，旧配置缺少该字段时同样关闭。两种模式共用 `WinProcessRunner::run()` 中的进程启动、监控、计量和错误处理。关闭时沿用原有进程环境；启用时由 `WindowsSandbox` 准备权限、AppContainer 属性和 Job，Job 用于进程数量限制和子进程回收。
+Windows AppContainer 沙箱作为实验性配置，默认关闭，按编译器显式启用。`SandboxSettings.enabled` 默认为 `false`，旧配置缺少该字段时同样关闭。两种模式共用 `WinProcessRunner::run()` 中的进程启动、监控、计量和错误处理。关闭时沿用原有进程环境；启用时由 `WindowsSandbox` 准备权限、AppContainer 属性和 Job，Job 仅允许一个活动进程，禁止提交程序创建子进程。
 
 启用时，`WinProcessRunner` 在 AppContainer 中执行提交程序，使用独立 Package SID、私有工作目录、标准流句柄白名单和 Job Object。`WindowsSandbox` 根据 `SandboxSettings` 发现 C、C++、Java、Python 运行环境，使用 `QDir::canonicalPath()` 规范化配置的目录名，运行环境中的目录连接由 Windows 文件接口跟随。运行目录与比赛数据、工作目录可以重叠，程序按配置准备只读权限。运行环境授权及发现结果仅在当前活动评测会话的内存中复用。`TaskJudger::judge()` 持有会话，结束或取消后释放；并发任务共用会话，最后一个使用者退出时撤销本会话新增的运行环境授权。会话使用独立命名 capability SID，避免影响其他进程的授权。禁止对整个宿主 PATH 重复设置继承 ACL。
 
-运行目录的现有文件逐项授权；目录句柄使用 `MAXIMUM_ALLOWED` 抑制 `SetSecurityInfo` 的递归传播，文件句柄仅请求元数据和 DACL 权限，兼容正在使用的 DLL。运行环境与工作文件共用文件检查和权限设置实现，工作文件使用独立的受保护 DACL。首次准备默认预算 15 秒，支持进度和取消。运行环境授权逐项设置为非继承 ACE，并在内存中记录，以便完整撤销。准备与撤销通过进程内互斥锁协调；准备失败时撤销该阶段新增的授权。临时工作文件使用私有 DACL，进程结束后移除 Package SID 授权；工作目录由 `TaskJudger` 现有的 `QTemporaryDir` 生命周期统一删除，省去完整 DACL 快照及还原。运行环境和 Python 探测记录仅存在于会话内存中，禁止写入缓存文件或文件锁。Java 和 Python 的环境发现分别由独立函数实现，`discover()` 仅分派策略。Python 探测使用普通 QProcess，超时或取消返回时由其析构函数终止探测进程并等待退出；AppContainer、Job 和标准流句柄白名单仅用于提交程序。
+运行目录的现有文件逐项授权；运行环境目录句柄使用 `MAXIMUM_ALLOWED` 抑制 `SetSecurityInfo` 的递归传播；工作目录和文件句柄请求元数据及 DACL 权限，工作目录保留 Windows 的 ACL 继承行为，文件操作兼容正在使用的 DLL。运行环境与工作文件共用文件检查和权限合并实现，在原 DACL 上追加本次沙箱权限，保留原有用户及其他主体的权限项和保护状态。首次准备默认预算 15 秒，准备过程仅检查时间预算，停止标记由进程运行器处理。准备进度回调、信号转发及指向当前运行线程的取消界面连接移除；整体评测的取消入口按原有定义停止后续测试点。运行环境授权逐项设置为非继承 ACE，并在内存中记录，以便完整撤销。准备与撤销通过进程内互斥锁协调；准备失败时撤销该阶段新增的授权。工作文件准备与撤销共用权限互斥锁，准备按先子项后父目录的顺序追加授权；工作目录的 Package SID 权限允许新建对象继承，进程结束后撤销。具名输入追加只读权限，并临时保护 DACL 以阻止目录写权限继承；仅为原本允许继承的具名输入保存原安全描述符，在父目录授权撤销后恢复原继承标记和保护状态；恢复操作基于现行 DACL，保留其他活动任务后来追加的授权。工作目录由 `TaskJudger` 现有的 `QTemporaryDir` 生命周期统一删除。运行环境和 Python 探测记录仅存在于会话内存中，禁止写入缓存文件或文件锁。Java 和 Python 的环境发现分别由独立函数实现，`discover()` 仅分派策略。Python 探测使用普通 QProcess，准备超时返回时由其析构函数终止探测进程并等待退出；AppContainer、Job 和标准流句柄白名单仅用于提交程序。
 
-启用沙箱时，本机程序的 Job 最多允许一个进程，Java 和 Python 最多允许 16 个进程。两种执行模式均保留原有计量：返回主进程用户态时间与峰值工作集，内存限制检查主进程 `PrivateUsage` 与 `PeakWorkingSetSize` 的较大值。Job 不参与时间和内存计量，也不设置总内存配额。运行监控保留 10 毫秒等待间隔，输出结果判断保留在评测层。关闭标准流重定向时保留空句柄，继承白名单仅包含实际打开的标准流。AppContainer 和 Job 在创建进程时通过属性配置，沿用原有启动标志。Python 输出编码、用户包加载和字节码缓存遵循解释器默认行为及用户显式配置。取消返回值、运行错误信息和启动优先级沿用原有定义。沙箱功能应保持现有评测行为，其他行为调整须取得用户明确授权。编译阶段和检查器当前仍使用宿主权限。
+`hasGrant()` 按 ACE 顺序检查剩余请求权限，允许项提供全部所需权限时结束检查。`ALL APPLICATION PACKAGES` SID 在会话内复用。工作文件授权省去当前用户 SID 查询、SDDL 模板及整份私有 DACL 构造。能力 SID 由独占所有权对象管理，进程属性数组仅引用它们。`quoteArgument()` 保存在测试源文件中，`errorText()` 保存在沙箱实现的匿名命名空间中。共享头文件 `windowsprocessutils.h` 提供 `Handle`、`LocalDeleter`、`LocalMemory` 和 `wide()`；生产代码与测试中要求 `LocalFree()` 释放的独立内存统一由 `LocalMemory` 管理，SID 数组由 `SidArray` 逐项释放，Package SID 使用 `FreeSid()`。`CreateProcessW()` 使用可写命令行缓冲区，失败后立即保存系统错误码。
+
+Windows 资源包装采用 `LocalMemory<Pointer>`，模板参数使用 Windows 指针类型，声明中保留 `PSECURITY_DESCRIPTOR`、`PACL`、`PSID` 和 `LPWSTR` 等类型信息。通过 `put()` 接收 API 输出、`get()` 访问资源、`release()` 转移所有权；`Handle` 同样提供 `put()`。`SidArray` 将数组和计数保存在私有成员中，通过输出地址接口接收能力 SID。沙箱准备分为运行环境授权和私有文件准备两个阶段，运行环境授权阶段在函数作用域中管理互斥锁与回滚守卫，成功后解除回滚。
+
+启用沙箱时，自动、本机程序、Java 和 Python 策略统一设置 Job 的 `ActiveProcessLimit = 1`，禁止提交程序创建子进程。运行器沿用 `TerminateProcess()` 终止主进程并等待退出；`stopProcesses()` 及进程树轮询、终止接口移除。Job 保留 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，在句柄关闭时终止仍在运行的进程。需要启动子进程的 Python 启动器和 Windows venv 会执行失败，应配置基础 Python 等单进程运行入口；执行时保留用户配置的启动程序，程序本身不会自动替换入口。可信 Python 环境探测仍使用宿主 QProcess。
+
+两种执行模式均保留原有计量：返回主进程用户态时间与峰值工作集，内存限制检查主进程 `PrivateUsage` 与 `PeakWorkingSetSize` 的较大值。Job 不参与时间和内存计量，也不设置总内存配额。运行监控保留 10 毫秒等待间隔，输出结果判断保留在评测层。关闭标准流重定向时保留空句柄，继承白名单仅包含实际打开的标准流。AppContainer 和 Job 在创建进程时通过属性配置，沿用原有启动标志。沙箱使用当前测试点工作目录，临时目录和用户目录环境变量保留用户显式配置，省去额外辅助目录及对应的环境变量覆盖。`LOCALAPPDATA` 缺省时设为当前测试点工作目录，以满足本机验证中 Windows 创建 AppContainer 进程的要求。Python 输出编码、用户包加载和字节码缓存遵循解释器默认行为及用户显式配置。取消返回值、运行错误信息和启动优先级沿用原有定义。沙箱功能应保持上述评测行为，其他行为调整须取得用户明确授权。编译阶段和检查器当前仍使用宿主权限。
 
 高级编译器设置提供默认未勾选的“实验性 Windows 沙箱”开关，启用后可以选择自动、本机程序、Java、Python 策略，额外只读目录和准备时间预算。配置通过 `Compiler` 的 JSON 字段 `windowsSandbox` 及 QSettings 的 `WindowsSandbox` 字段保存。
 
@@ -210,12 +216,12 @@ BasedOnStyle: LLVM
 BreakBeforeBraces: Attach
 IndentWidth: 4
 TabWidth: 4
-UseTab: ForIndentation       # 使用 Tab 缩进
+UseTab: ForIndentation # 使用 Tab 缩进
 ColumnLimit: 110
 ContinuationIndentWidth: 4
 IndentCaseLabels: true
-NamespaceIndentation: All    # 命名空间内容也缩进
-SpaceAfterLogicalNot: true   # "! expr" 而非 "!expr"
+NamespaceIndentation: All # 命名空间内容也缩进
+SpaceAfterLogicalNot: true # "! expr" 而非 "!expr"
 ```
 
 ### 头文件保护
@@ -363,7 +369,7 @@ enum ResultState {
 
 ### 平台兼容性
 
-- **Windows**: 实验性 AppContainer 沙箱默认关闭，可按编译器启用。启用时由 Job Object 限制进程数量并回收子进程，时间和内存保持原有主进程计量。CI 使用 MSVC。启用沙箱后的准备需要所选运行目录具有适当的读取与执行授权，或允许当前用户配置该授权；失败时报告原因并停止该次运行。
+- **Windows**: 实验性 AppContainer 沙箱默认关闭，可按编译器启用。启用时所有运行策略均由 Job Object 限制为一个活动进程，禁止提交程序创建子进程；时间和内存保持原有主进程计量。需要子进程的 Python 启动器和 Windows venv 会执行失败，应配置单进程运行入口。CI 使用 MSVC。启用沙箱后的准备需要所选运行目录具有适当的读取与执行授权，或允许当前用户配置该授权；失败时报告原因并停止该次运行。
 - **macOS**: 需使用 `watcher_macos.mm`（Objective-C++）编译 watcher，否则内存限制功能异常。Apple Silicon 不保证评测稳定性。
 - **Linux**: 默认栈空间与内存限制相同。watcher 使用 `watcher_linux.cpp`。静态编译为推荐分发方式。
 
@@ -387,18 +393,18 @@ enum ResultState {
 
 **type 必须是以下之一**：
 
-| type | 说明 |
-|------|------|
-| `feat` | 新功能 |
-| `fix` | 修复 bug |
-| `refactor` | 重构（不改变功能） |
-| `style` | 代码格式调整（不影响逻辑） |
-| `docs` | 文档变更 |
-| `build` | 构建系统或依赖变更 |
-| `ci` | CI 配置变更 |
-| `perf` | 性能优化 |
-| `test` | 测试相关 |
-| `chore` | 其他杂项 |
+| type       | 说明                       |
+| ---------- | -------------------------- |
+| `feat`     | 新功能                     |
+| `fix`      | 修复 bug                   |
+| `refactor` | 重构（不改变功能）         |
+| `style`    | 代码格式调整（不影响逻辑） |
+| `docs`     | 文档变更                   |
+| `build`    | 构建系统或依赖变更         |
+| `ci`       | CI 配置变更                |
+| `perf`     | 性能优化                   |
+| `test`     | 测试相关                   |
+| `chore`    | 其他杂项                   |
 
 **规则**：
 
@@ -439,13 +445,13 @@ refactor: extract JSON serialization helpers to LemonUtils
 
 ### CI 工作流
 
-| 工作流 | 说明 |
-|--------|------|
-| `windows-qt6.yml` | Windows MSVC + Qt 6.9.3 构建 |
-| `linux-static-qt6.yml` | Linux 静态链接 Qt6 构建 |
-| `macos-qt6.yml` | macOS Qt6 构建 |
-| `cpack-deb-debian.yml` | Debian DEB 包构建 |
-| `check_format.yml` | 代码格式检查（clang-format） |
+| 工作流                 | 说明                         |
+| ---------------------- | ---------------------------- |
+| `windows-qt6.yml`      | Windows MSVC + Qt 6.9.3 构建 |
+| `linux-static-qt6.yml` | Linux 静态链接 Qt6 构建      |
+| `macos-qt6.yml`        | macOS Qt6 构建               |
+| `cpack-deb-debian.yml` | Debian DEB 包构建            |
+| `check_format.yml`     | 代码格式检查（clang-format） |
 
 ### 文件编码
 
