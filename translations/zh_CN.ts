@@ -2032,16 +2032,8 @@ Depends: </source>
 %2</translation>
     </message>
     <message>
-        <source>Preparing Windows sandbox...</source>
-        <translation>正在准备 Windows 沙箱……</translation>
-    </message>
-    <message>
         <source>Python runtime discovery produced excessive output.</source>
         <translation>Python 环境识别产生的输出过多。</translation>
-    </message>
-    <message>
-        <source>Running in Windows sandbox...</source>
-        <translation>正在 Windows 沙箱内执行……</translation>
     </message>
     <message>
         <source>Sandbox files must not be reparse points or hard links: %1</source>

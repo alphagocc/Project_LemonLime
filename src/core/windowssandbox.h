@@ -14,13 +14,12 @@
 class WindowsSandbox {
   public:
 	static std::shared_ptr<WindowsSandboxSession> createSession();
-	WindowsSandbox(const ProcessRunnerConfig &config, const std::atomic<bool> &stop);
+	explicit WindowsSandbox(const ProcessRunnerConfig &config);
 	~WindowsSandbox();
 	WindowsSandbox(const WindowsSandbox &) = delete;
 	WindowsSandbox &operator=(const WindowsSandbox &) = delete;
 	bool prepare(QString &error);
 	bool prepareProcess(STARTUPINFOEXW &startup, QString &error);
-	bool stopProcesses(QString &error);
 	const QProcessEnvironment &environment() const;
 	int aclUpdates() const;
 	bool cacheHit() const;

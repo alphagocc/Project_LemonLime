@@ -450,7 +450,6 @@ int TaskJudger::judge() {
 			thread->setWorkingDirectory(workingDirectory);
 			thread->setSandboxConfiguration(sandboxSettings, runtimeExecutable, runtimeEnvironment,
 			                                sandboxSession);
-			connect(thread, &JudgingThread::preparationProgress, this, &TaskJudger::makeDialogAlert);
 			QDir(QDir::toNativeSeparators(temporaryDir.path()) + QDir::separator())
 			    .mkdir(QString("_%1.%2").arg(i).arg(j));
 			QStringList entryList =
@@ -492,7 +491,6 @@ int TaskJudger::judge() {
 			}
 
 			thread->setTask(task);
-			connect(this, &TaskJudger::stopJudgingSignal, thread, &JudgingThread::stopJudgingSlot);
 			thread->setInputFile(Settings::dataPath() + curTestCase->getInputFiles().at(j));
 			thread->setOutputFile(Settings::dataPath() + curTestCase->getOutputFiles().at(j));
 			thread->setFullScore(curTestCase->getFullScore());

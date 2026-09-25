@@ -23,10 +23,9 @@
 #include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QThread>
 #include <QUuid>
 #include <aclapi.h>
-#include <sddl.h>
+#include <cstring>
 #include <userenv.h>
 #include <vector>
 
@@ -38,6 +37,52 @@ namespace {
 	QMutex permissionsMutex;
 	QMutex sessionMutex;
 	std::weak_ptr<WindowsSandboxSession> activeSession;
+	constexpr DWORD PrivateFileAccess =
+	    FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
+
+	class SidArray {
+	  public:
+		SidArray() = default;
+		SidArray(const SidArray &) = delete;
+		SidArray &operator=(const SidArray &) = delete;
+		~SidArray() {
+			for (DWORD i = 0; values && i < count; ++i)
+				LocalFree(values[i]);
+
+			LocalFree(values);
+		}
+
+		PSID **getAddress() { return &values; }
+		DWORD *getCountAddress() { return &count; }
+		LocalMemory<PSID> takeFirst() {
+			if (! count)
+				return {};
+
+			return LocalMemory<PSID>(std::exchange(values[0], nullptr));
+		}
+
+	  private:
+		PSID *values = nullptr;
+		DWORD count = 0;
+	};
+
+	QString errorText(DWORD code) {
+		LocalMemory<LPWSTR> buffer;
+		FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+		                   FORMAT_MESSAGE_IGNORE_INSERTS,
+		               nullptr, code, 0, reinterpret_cast<wchar_t *>(buffer.put()), 0, nullptr);
+		const auto text = buffer ? QString::fromWCharArray(buffer.get()).trimmed() : QString();
+		return QString("%1 (Windows error %2)").arg(text).arg(code);
+	}
+
+	DWORD daclInformation(PSECURITY_DESCRIPTOR descriptor) {
+		SECURITY_DESCRIPTOR_CONTROL control = 0;
+		DWORD revision = 0;
+		GetSecurityDescriptorControl(descriptor, &control, &revision);
+		return DACL_SECURITY_INFORMATION |
+		       ((control & SE_DACL_PROTECTED) ? PROTECTED_DACL_SECURITY_INFORMATION
+		                                      : UNPROTECTED_DACL_SECURITY_INFORMATION);
+	}
 
 	Handle openAclFile(const QString &path, bool privateFile) {
 		const auto nativePath = QDir::toNativeSeparators(path);
@@ -46,17 +91,20 @@ namespace {
 		    attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
 		const DWORD flags = FILE_FLAG_BACKUP_SEMANTICS | (privateFile ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
 		HANDLE file = CreateFileW(
-		    wide(nativePath), directory ? MAXIMUM_ALLOWED : READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+		    wide(nativePath),
+		    directory && ! privateFile ? MAXIMUM_ALLOWED : READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
 		    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags, nullptr);
 		if (file == INVALID_HANDLE_VALUE && ! directory && ! privateFile &&
-		    GetLastError() == ERROR_ACCESS_DENIED)
+		    GetLastError() == ERROR_ACCESS_DENIED) {
 			file = CreateFileW(wide(nativePath), READ_CONTROL | FILE_READ_ATTRIBUTES,
 			                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
 			                   flags, nullptr);
+		}
 		return Handle(file);
 	}
 
-	void revokeSid(const QString &path, PSID sid, bool privateFile = false) {
+	void revokeSid(const QString &path, PSID sid, bool privateFile = false,
+	               PSECURITY_DESCRIPTOR originalPermissions = nullptr) {
 		auto file = openAclFile(path, privateFile);
 		if (! file) {
 			const DWORD code = GetLastError();
@@ -64,16 +112,17 @@ namespace {
 				WARN("Cannot open file to revoke sandbox permissions.", path, errorText(code));
 			return;
 		}
-		PSECURITY_DESCRIPTOR descriptor = nullptr;
+
+		LocalMemory<PSECURITY_DESCRIPTOR> descriptor;
 		PACL acl = nullptr;
 		DWORD status = GetSecurityInfo(file.get(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
-		                               nullptr, &acl, nullptr, &descriptor);
-		auto cleanup = qScopeGuard([&] { LocalFree(descriptor); });
+		                               nullptr, &acl, nullptr, descriptor.put());
 		if (status != ERROR_SUCCESS) {
 			WARN("Cannot read sandbox permissions for cleanup.", path, errorText(status));
 			return;
 		}
-		bool changed = false;
+
+		bool changed = originalPermissions != nullptr;
 		for (DWORD i = acl ? acl->AceCount : 0; i > 0; --i) {
 			void *entry = nullptr;
 			if (! GetAce(acl, i - 1, &entry))
@@ -85,8 +134,39 @@ namespace {
 				changed = true;
 			}
 		}
+		if (originalPermissions && acl) {
+			PACL originalAcl = nullptr;
+			BOOL present = FALSE, defaulted = FALSE;
+			GetSecurityDescriptorDacl(originalPermissions, &present, &originalAcl, &defaulted);
+			// Protection converts inherited ACEs to explicit ones. Restore their inheritance flags
+			// in the current ACL so grants added by other active tasks remain intact.
+			for (DWORD i = 0; originalAcl && i < originalAcl->AceCount; ++i) {
+				void *originalEntry = nullptr;
+				if (! GetAce(originalAcl, i, &originalEntry))
+					continue;
+				const auto *original = static_cast<ACE_HEADER *>(originalEntry);
+				if (! (original->AceFlags & INHERITED_ACE))
+					continue;
+				for (DWORD j = 0; j < acl->AceCount; ++j) {
+					void *currentEntry = nullptr;
+					if (! GetAce(acl, j, &currentEntry))
+						continue;
+					auto *current = static_cast<ACE_HEADER *>(currentEntry);
+					if (current->AceType == original->AceType && current->AceSize == original->AceSize &&
+					    current->AceFlags == (original->AceFlags & ~INHERITED_ACE) &&
+					    std::memcmp(static_cast<BYTE *>(currentEntry) + sizeof(ACE_HEADER),
+					                static_cast<BYTE *>(originalEntry) + sizeof(ACE_HEADER),
+					                original->AceSize - sizeof(ACE_HEADER)) == 0) {
+						current->AceFlags |= INHERITED_ACE;
+						break;
+					}
+				}
+			}
+		}
+
 		if (changed) {
-			status = SetSecurityInfo(file.get(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
+			const auto source = originalPermissions ? originalPermissions : descriptor.get();
+			status = SetSecurityInfo(file.get(), SE_FILE_OBJECT, daclInformation(source), nullptr, nullptr,
 			                         acl, nullptr);
 			if (status != ERROR_SUCCESS)
 				WARN("Cannot revoke sandbox permissions.", path, errorText(status));
@@ -100,26 +180,33 @@ namespace {
 
 	// QDir("") 表示当前工作目录；此处保留空值，以表示未配置的目录或运行工具。
 	QString canonical(const QString &path) { return path.isEmpty() ? QString() : QDir(path).canonicalPath(); }
+
 	bool within(const QString &path, const QString &root) {
 		return path.compare(root, Qt::CaseInsensitive) == 0 ||
 		       path.startsWith(root + '/', Qt::CaseInsensitive);
 	}
+
 	QString hash(const QString &text) {
 		return QString::fromLatin1(
 		    QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256).toHex());
 	}
+
 	QString stamp(const QString &path) {
 		const QFileInfo info(path);
 		return QString("%1:%2").arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
 	}
+
 	bool hasGrant(PACL acl, PSID sid, DWORD rights) {
-		if (! acl)
+		if (! acl || ! rights)
 			return true;
-		DWORD allowed = 0;
+
+		DWORD remaining = rights;
+		GENERIC_MAPPING mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS};
 		for (DWORD i = 0; i < acl->AceCount; ++i) {
 			void *entry = nullptr;
 			if (! GetAce(acl, i, &entry))
 				return false;
+
 			const auto *header = static_cast<ACE_HEADER *>(entry);
 			if (header->AceFlags & INHERIT_ONLY_ACE)
 				continue;
@@ -128,21 +215,26 @@ namespace {
 			const auto *ace = static_cast<ACCESS_ALLOWED_ACE *>(entry);
 			if (! EqualSid(const_cast<DWORD *>(&ace->SidStart), sid))
 				continue;
+
 			DWORD mask = ace->Mask;
-			GENERIC_MAPPING mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
-			                        FILE_ALL_ACCESS};
 			MapGenericMask(&mask, &mapping);
-			if (header->AceType == ACCESS_DENIED_ACE_TYPE && (mask & rights))
-				return false;
-			allowed |= mask;
+			if (header->AceType == ACCESS_DENIED_ACE_TYPE) {
+				if (mask & remaining)
+					return false;
+			} else {
+				remaining &= ~mask;
+				if (! remaining)
+					return true;
+			}
 		}
-		return (allowed & rights) == rights;
+		return false;
 	}
 } // namespace
 
 class WindowsSandboxSession {
   public:
 	QString id = QUuid::createUuid().toString(QUuid::Id128);
+	QByteArray allPackagesSid;
 	QHash<QString, QString> runtimes;
 	QHash<QString, QStringList> pythonRoots;
 	std::vector<RuntimeAcl> grants;
@@ -156,45 +248,55 @@ class WindowsSandboxSession {
 
 struct WindowsSandbox::Data {
 	const ProcessRunnerConfig &config;
-	const std::atomic<bool> &stop;
 	QElapsedTimer timer;
-	qint64 lastProgress = -500;
+
 	QString profileName;
 	PSID packageSid = nullptr;
-	QString privateSddl;
 	QString workingDirectory;
+	QString protectedInput;
+	LocalMemory<PSECURITY_DESCRIPTOR> inputPermissions;
+
 	std::shared_ptr<WindowsSandboxSession> session;
 	QProcessEnvironment childEnvironment;
 	SandboxSettings::Runtime runtime = SandboxSettings::Native;
+
 	std::vector<SID_AND_ATTRIBUTES> capabilityList;
+	std::vector<LocalMemory<PSID>> capabilitySids;
 	Handle job;
 	std::vector<BYTE> attributeBuffer;
 	LPPROC_THREAD_ATTRIBUTE_LIST attributeList = nullptr;
 	SECURITY_CAPABILITIES processCapabilities{};
 	HANDLE inheritedHandles[3]{};
 	HANDLE jobs[1]{};
+
 	int updates = 0;
 	bool hit = true;
 	QString error;
 
-	Data(const ProcessRunnerConfig &config, const std::atomic<bool> &stop)
-	    : config(config), stop(stop),
+	explicit Data(const ProcessRunnerConfig &config)
+	    : config(config),
 	      session(config.sandboxSession ? config.sandboxSession : WindowsSandbox::createSession()) {}
+
 	~Data() {
-		stopProcesses();
+		job.reset();
+
 		if (! workingDirectory.isEmpty()) {
 			QMutexLocker lock(&permissionsMutex);
 			revokeSid(workingDirectory, packageSid, true);
 			QDirIterator files(workingDirectory,
 			                   QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
 			                   QDirIterator::Subdirectories);
-			while (files.hasNext())
-				revokeSid(files.next(), packageSid, true);
+			while (files.hasNext()) {
+				const auto path = files.next();
+				if (path != protectedInput)
+					revokeSid(path, packageSid, true);
+			}
+			if (inputPermissions)
+				revokeSid(protectedInput, packageSid, true, inputPermissions.get());
 		}
+
 		if (attributeList)
 			DeleteProcThreadAttributeList(attributeList);
-		for (const auto &capability : capabilityList)
-			LocalFree(capability.Sid);
 		if (packageSid) {
 			DeleteAppContainerProfile(wide(profileName));
 			FreeSid(packageSid);
@@ -202,17 +304,12 @@ struct WindowsSandbox::Data {
 	}
 
 	bool checkBudget() {
-		if (stop)
-			return fail("Windows sandbox preparation cancelled.");
-		if (timer.elapsed() >= config.sandboxSettings.preparationTimeLimit)
+		if (timer.elapsed() >= config.sandboxSettings.preparationTimeLimit) {
 			return fail(
 			    QObject::tr(
 			        "Windows sandbox preparation exceeded %1 seconds. Increase the preparation limit in "
 			        "compiler settings.")
 			        .arg(config.sandboxSettings.preparationTimeLimit / 1000));
-		if (config.preparationProgress && timer.elapsed() - lastProgress >= 500) {
-			lastProgress = timer.elapsed();
-			config.preparationProgress(QObject::tr("Preparing Windows sandbox..."));
 		}
 		return true;
 	}
@@ -237,21 +334,23 @@ struct WindowsSandbox::Data {
 	bool prepareProcess(STARTUPINFOEXW &startup) {
 		DWORD handleCount = 0;
 		for (HANDLE handle :
-		     {startup.StartupInfo.hStdInput, startup.StartupInfo.hStdOutput, startup.StartupInfo.hStdError})
+		     {startup.StartupInfo.hStdInput, startup.StartupInfo.hStdOutput, startup.StartupInfo.hStdError}) {
 			if (handle)
 				inheritedHandles[handleCount++] = handle;
+		}
 		for (DWORD i = 0; i < handleCount; ++i)
 			if (! inheritedHandles[i] || inheritedHandles[i] == INVALID_HANDLE_VALUE)
 				return processFailure("Cannot open sandbox standard streams.", ERROR_INVALID_HANDLE);
+
 		job.reset(CreateJobObjectW(nullptr, nullptr));
 		if (! job)
 			return processFailure("Cannot create sandbox job.");
 		JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
 		limits.BasicLimitInformation.LimitFlags =
 		    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-		// The native policy uses the job limit because the child-process creation
+		// Use the job limit because the child-process creation
 		// attribute can fail AppContainer DLL initialization on Windows.
-		limits.BasicLimitInformation.ActiveProcessLimit = runtime == SandboxSettings::Native ? 1 : 16;
+		limits.BasicLimitInformation.ActiveProcessLimit = 1;
 		if (! SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
 			return processFailure("Cannot set sandbox process limits.");
 		JOBOBJECT_BASIC_UI_RESTRICTIONS uiLimits{};
@@ -277,33 +376,13 @@ struct WindowsSandbox::Data {
 		    ! UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inheritedHandles,
 		                                handleCount * sizeof(HANDLE), nullptr, nullptr) ||
 		    ! UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, jobs, sizeof(jobs),
-		                                nullptr, nullptr))
+		                                nullptr, nullptr)) {
 			return processFailure("Cannot configure sandbox process attributes.");
+		}
 		return true;
 	}
 
-	bool stopProcesses() {
-		if (! job)
-			return true;
-		TerminateJobObject(job.get(), 0);
-		JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
-		QElapsedTimer cleanup;
-		cleanup.start();
-		do {
-			if (! QueryInformationJobObject(job.get(), JobObjectBasicAccountingInformation, &accounting,
-			                                sizeof(accounting), nullptr))
-				return processFailure("Cannot confirm sandbox shutdown.");
-			if (accounting.ActiveProcesses == 0) {
-				job.reset();
-				return true;
-			}
-			QThread::msleep(10);
-		} while (cleanup.elapsed() < 5000);
-		return processFailure("Sandbox processes did not stop within the cleanup deadline.", WAIT_TIMEOUT);
-	}
-
-	// Directory handles use MAXIMUM_ALLOWED to suppress recursive ACL propagation.
-	// Check every existing file ourselves so the preparation budget remains effective.
+	// Runtime directory grants do not propagate. Work directory grants retain Windows ACL inheritance.
 	bool grantFile(const QString &path, PSID sid, DWORD access = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE) {
 		if (! checkBudget())
 			return false;
@@ -315,49 +394,45 @@ struct WindowsSandbox::Data {
 		if (! GetFileInformationByHandle(file.get(), &info))
 			return fail("Cannot inspect sandbox resource.", path);
 		if (privateFile &&
-		    ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || info.nNumberOfLinks > 1))
+		    ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || info.nNumberOfLinks > 1)) {
 			return fail(QObject::tr("Sandbox files must not be reparse points or hard links: %1").arg(path));
-		PSECURITY_DESCRIPTOR descriptor = nullptr;
-		PACL acl = nullptr, updated = nullptr;
-		auto cleanup = qScopeGuard([&] {
-			LocalFree(descriptor);
-			LocalFree(updated);
-		});
-		if (privateFile) {
-			if (! ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(privateSddl.arg(access, 0, 16)),
-			                                                           SDDL_REVISION_1, &descriptor, nullptr))
-				return fail("Cannot construct sandbox permissions.", path);
-			BOOL present = FALSE, defaulted = FALSE;
-			GetSecurityDescriptorDacl(descriptor, &present, &acl, &defaulted);
-		} else {
-			DWORD status = GetSecurityInfo(file.get(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
-			                               nullptr, &acl, nullptr, &descriptor);
-			if (status != ERROR_SUCCESS)
-				return fail("Cannot read runtime permissions.", path, status);
-			BYTE allPackages[SECURITY_MAX_SID_SIZE];
-			DWORD sidSize = sizeof(allPackages);
-			CreateWellKnownSid(WinBuiltinAnyPackageSid, nullptr, allPackages, &sidSize);
-			if (hasGrant(acl, sid, access) || hasGrant(acl, allPackages, access))
-				return true;
-			EXPLICIT_ACCESSW entry{};
-			entry.grfAccessPermissions = access;
-			entry.grfAccessMode = GRANT_ACCESS;
-			// Existing runtime files are granted individually; new files must not inherit temporary grants.
-			entry.grfInheritance = NO_INHERITANCE;
-			BuildTrusteeWithSidW(&entry.Trustee, sid);
-			status = SetEntriesInAclW(1, &entry, acl, &updated);
-			if (status != ERROR_SUCCESS)
-				return fail("Cannot construct runtime permissions.", path, status);
-			acl = updated;
 		}
-		const DWORD status = SetSecurityInfo(file.get(), SE_FILE_OBJECT,
-		                                     DACL_SECURITY_INFORMATION |
-		                                         (privateFile ? PROTECTED_DACL_SECURITY_INFORMATION : 0),
-		                                     nullptr, nullptr, acl, nullptr);
+		PACL acl = nullptr;
+		LocalMemory<PSECURITY_DESCRIPTOR> descriptor;
+		LocalMemory<PACL> updatedAcl;
+		DWORD status = GetSecurityInfo(file.get(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+		                               nullptr, &acl, nullptr, descriptor.put());
 		if (status != ERROR_SUCCESS)
+			return fail("Cannot read sandbox resource permissions.", path, status);
+		if (! acl || (! privateFile &&
+		              (hasGrant(acl, sid, access) || hasGrant(acl, session->allPackagesSid.data(), access))))
+			return true;
+		EXPLICIT_ACCESSW entry{};
+		entry.grfAccessPermissions = access;
+		entry.grfAccessMode = GRANT_ACCESS;
+		// Work directories pass sandbox permissions to new files; runtime grants stay non-inheritable.
+		entry.grfInheritance = privateFile && (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		                           ? SUB_CONTAINERS_AND_OBJECTS_INHERIT
+		                           : NO_INHERITANCE;
+		BuildTrusteeWithSidW(&entry.Trustee, sid);
+		const bool readOnlyInput = privateFile && access == FILE_GENERIC_READ;
+		status = SetEntriesInAclW(1, &entry, acl, updatedAcl.put());
+		if (status != ERROR_SUCCESS)
+			return fail("Cannot construct sandbox resource permissions.", path, status);
+		const DWORD information = daclInformation(descriptor.get());
+		status = SetSecurityInfo(
+		    file.get(), SE_FILE_OBJECT,
+		    readOnlyInput ? DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION : information,
+		    nullptr, nullptr, updatedAcl.get(), nullptr);
+		if (status != ERROR_SUCCESS) {
 			return fail("Cannot set sandbox permissions. Use a user-owned runtime installation or have its "
 			            "owner prepare read and execute access.",
 			            path, status);
+		}
+		if (readOnlyInput && (information & UNPROTECTED_DACL_SECURITY_INFORMATION)) {
+			protectedInput = path;
+			inputPermissions = std::move(descriptor);
+		}
 		if (! privateFile) {
 			QByteArray savedSid(GetLengthSid(sid), Qt::Uninitialized);
 			CopySid(DWORD(savedSid.size()), savedSid.data(), sid);
@@ -366,6 +441,7 @@ struct WindowsSandbox::Data {
 		}
 		return true;
 	}
+
 	PSID addCapability(const QString &name) {
 		const auto derive = reinterpret_cast<decltype(&DeriveCapabilitySidsFromName)>(
 		    GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "DeriveCapabilitySidsFromName"));
@@ -373,21 +449,21 @@ struct WindowsSandbox::Data {
 			fail("Cannot load named sandbox capability API.", {});
 			return nullptr;
 		}
-		PSID *groups = nullptr, *sids = nullptr;
-		DWORD groupCount = 0, count = 0;
-		if (! derive(wide(name), &groups, &groupCount, &sids, &count)) {
+		SidArray groups;
+		SidArray sids;
+		if (! derive(wide(name), groups.getAddress(), groups.getCountAddress(), sids.getAddress(),
+		             sids.getCountAddress())) {
 			fail("Cannot derive sandbox capability.", name);
 			return nullptr;
 		}
-		PSID result = count ? sids[0] : nullptr;
-		for (DWORD i = 0; i < groupCount; ++i)
-			LocalFree(groups[i]);
-		for (DWORD i = 1; i < count; ++i)
-			LocalFree(sids[i]);
-		LocalFree(groups);
-		LocalFree(sids);
-		if (result)
-			capabilityList.push_back({result, SE_GROUP_ENABLED});
+		auto sid = sids.takeFirst();
+		if (! sid) {
+			fail("Cannot derive sandbox capability.", name, ERROR_INVALID_SID);
+			return nullptr;
+		}
+		const auto result = sid.get();
+		capabilitySids.push_back(std::move(sid));
+		capabilityList.push_back({result, SE_GROUP_ENABLED});
 		return result;
 	}
 
@@ -453,17 +529,19 @@ struct WindowsSandbox::Data {
 					return fail(QObject::tr("Python runtime discovery produced excessive output."));
 			}
 			const auto values = QJsonDocument::fromJson(probe.readAllStandardOutput()).array();
-			if (probe.exitStatus() != QProcess::NormalExit || probe.exitCode() != 0 || values.size() != 3)
+			if (probe.exitStatus() != QProcess::NormalExit || probe.exitCode() != 0 || values.size() != 3) {
 				return fail(QObject::tr("Cannot discover the Python runtime: %1\n%2")
 				                .arg(tool, QString::fromUtf8(probe.readAllStandardError().left(2048))));
+			}
 			roots = {values[0].toString(), values[1].toString(),
 			         QFileInfo(values[2].toString()).absolutePath()};
 			session->pythonRoots[key] = roots;
 		}
 		QDir venv(QFileInfo(tool).absolutePath());
 		if (venv.dirName().compare("Scripts", Qt::CaseInsensitive) == 0 && venv.cdUp() &&
-		    QFileInfo::exists(venv.filePath("pyvenv.cfg")))
+		    QFileInfo::exists(venv.filePath("pyvenv.cfg"))) {
 			roots.append(venv.absolutePath());
+		}
 		return true;
 	}
 
@@ -477,64 +555,56 @@ struct WindowsSandbox::Data {
 		return true;
 	}
 
-	bool prepare() {
-		timer.start();
-		if (! checkBudget())
-			return false;
-		QString tool = config.runtimeExecutable;
-		if (! tool.isEmpty() && QFileInfo(tool).isRelative())
-			tool = QStandardPaths::findExecutable(
-			    tool, config.environment.value("PATH").split(';', Qt::SkipEmptyParts));
-		tool = canonical(tool);
-		if (! config.runtimeExecutable.isEmpty() && tool.isEmpty())
-			return fail(QObject::tr("The configured sandbox runtime executable does not exist: %1")
-			                .arg(config.runtimeExecutable));
-		runtime = config.sandboxSettings.runtime;
-		if (runtime == SandboxSettings::Automatic) {
-			const auto name = QFileInfo(tool).baseName().toLower();
-			runtime = name.startsWith("python") || name.startsWith("pypy") ? SandboxSettings::Python
-			          : name == "java"                                     ? SandboxSettings::Java
-			                                                               : SandboxSettings::Native;
-		}
+	bool prepareRuntimePermissions(const QString &tool, QStringList &roots) {
 		while (! permissionsMutex.tryLock(25)) {
 			if (! checkBudget())
 				return false;
 		}
+
 		auto unlock = qScopeGuard([&] { permissionsMutex.unlock(); });
+		if (session->allPackagesSid.isEmpty()) {
+			QByteArray sid(SECURITY_MAX_SID_SIZE, Qt::Uninitialized);
+			DWORD size = DWORD(sid.size());
+			if (! CreateWellKnownSid(WinBuiltinAnyPackageSid, nullptr, sid.data(), &size))
+				return fail("Cannot create the all-packages identity.", {});
+			sid.resize(size);
+			session->allPackagesSid = std::move(sid);
+		}
+
 		const auto firstGrant = session->grants.size();
 		const auto previousRuntimes = session->runtimes;
-		bool runtimeReady = false;
 		auto rollback = qScopeGuard([&] {
-			if (! runtimeReady) {
-				while (session->grants.size() > firstGrant) {
-					auto &grant = session->grants.back();
-					revokeSid(grant.path, grant.sid.data());
-					session->grants.pop_back();
-				}
-				session->runtimes = previousRuntimes;
+			while (session->grants.size() > firstGrant) {
+				auto &grant = session->grants.back();
+				revokeSid(grant.path, grant.sid.data());
+				session->grants.pop_back();
 			}
+			session->runtimes = previousRuntimes;
 		});
-		QStringList roots;
-		if (! discover(tool, roots))
+
+		QStringList discoveredRoots;
+		if (! discover(tool, discoveredRoots))
 			return false;
-		QStringList seen;
-		for (const auto &root : roots) {
+
+		for (const auto &root : discoveredRoots) {
 			const auto resolved = canonical(root);
-			if (seen.contains(resolved, Qt::CaseInsensitive))
+			if (roots.contains(resolved, Qt::CaseInsensitive))
 				continue;
-			seen.append(resolved);
+			roots.append(resolved);
 			if (! prepareRuntime(resolved, tool, runtime == SandboxSettings::Native))
 				return false;
 		}
+
 		for (const auto &root : config.sandboxSettings.readOnlyDirectories) {
 			const auto resolved = canonical(root);
 			if (! prepareRuntime(resolved, tool, false))
 				return false;
-			seen.append(resolved);
+			roots.append(resolved);
 		}
+
 		if (! tool.isEmpty() && runtime != SandboxSettings::Native) {
 			bool covered = false;
-			for (const auto &root : seen)
+			for (const auto &root : roots)
 				covered = covered || within(tool, root);
 			if (! covered) {
 				// A launcher outside the runtime (for example uv) needs access to its own file.
@@ -544,65 +614,92 @@ struct WindowsSandbox::Data {
 			}
 		}
 
-		runtimeReady = true;
-		unlock.dismiss();
-		permissionsMutex.unlock();
-		HANDLE rawToken = nullptr;
-		if (! OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
-			return fail("Cannot read the current user identity.", {});
-		Handle token(rawToken);
-		DWORD size = 0;
-		GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
-		std::vector<BYTE> tokenBuffer(size);
-		if (! GetTokenInformation(token.get(), TokenUser, tokenBuffer.data(), size, &size))
-			return fail("Cannot read the current user identity.", {});
-		wchar_t *userText = nullptr;
-		if (! ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(tokenBuffer.data())->User.Sid, &userText))
-			return fail("Cannot encode the current user identity.", {});
-		const auto userSid = QString::fromWCharArray(userText);
-		LocalFree(userText);
+		rollback.dismiss();
+		return true;
+	}
+
+	bool preparePrivateFiles() {
 		profileName = "LemonLime.Run." + QUuid::createUuid().toString(QUuid::Id128);
 		const HRESULT status = CreateAppContainerProfile(wide(profileName), wide(profileName),
 		                                                 L"LemonLime judging", nullptr, 0, &packageSid);
 		if (FAILED(status))
 			return fail("Cannot create AppContainer.", {}, DWORD(status));
-		wchar_t *packageText = nullptr;
-		if (! ConvertSidToStringSidW(packageSid, &packageText))
-			return fail("Cannot encode sandbox identity.", {});
-		privateSddl = QString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;%1)(A;OICI;0x%3;;;%2)")
-		                  .arg(userSid, QString::fromWCharArray(packageText));
-		LocalFree(packageText);
+
 		const auto work = canonical(config.workingDirectory);
-		if (work.size() <= 3 || work.startsWith("//"))
+		if (work.size() <= 3 || work.startsWith("//")) {
 			return fail(
 			    QObject::tr("A private local working directory is required for the Windows sandbox."));
-		if (! QDir(work).mkpath(".sandbox-tmp") || ! QDir(work).mkpath(".sandbox-home"))
-			return fail("Cannot create private sandbox directories.", work);
+		}
 		workingDirectory = work;
-		constexpr DWORD writable = FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
-		if (! grantFile(work, packageSid, writable))
-			return false;
+		while (! permissionsMutex.tryLock(25)) {
+			if (! checkBudget())
+				return false;
+		}
+		auto unlock = qScopeGuard([&] { permissionsMutex.unlock(); });
 		const auto namedInput = canonical(QDir(work).filePath(config.inputFileName));
+		QStringList paths;
 		QDirIterator files(work, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
 		                   QDirIterator::Subdirectories);
 		while (files.hasNext()) {
-			const auto path = files.next();
+			if (! checkBudget())
+				return false;
+			paths.append(files.next());
+		}
+		// Validate and grant descendants before their parents can propagate inheritable permissions.
+		for (auto it = paths.crbegin(); it != paths.crend(); ++it) {
+			const auto &path = *it;
 			const bool inputOnly = ! config.standardInputCheck && ! config.inputFileName.isEmpty() &&
 			                       path.compare(namedInput, Qt::CaseInsensitive) == 0;
-			if (! grantFile(path, packageSid, inputOnly ? FILE_GENERIC_READ : writable))
+			if (! grantFile(path, packageSid, inputOnly ? FILE_GENERIC_READ : PrivateFileAccess))
 				return false;
 		}
+		return grantFile(work, packageSid, PrivateFileAccess);
+	}
+
+	bool prepare() {
+		timer.start();
+		if (! checkBudget())
+			return false;
+
+		QString tool = config.runtimeExecutable;
+		if (! tool.isEmpty() && QFileInfo(tool).isRelative()) {
+			tool = QStandardPaths::findExecutable(
+			    tool, config.environment.value("PATH").split(';', Qt::SkipEmptyParts));
+		}
+		tool = canonical(tool);
+		if (! config.runtimeExecutable.isEmpty() && tool.isEmpty()) {
+			return fail(QObject::tr("The configured sandbox runtime executable does not exist: %1")
+			                .arg(config.runtimeExecutable));
+		}
+
+		runtime = config.sandboxSettings.runtime;
+		if (runtime == SandboxSettings::Automatic) {
+			const auto name = QFileInfo(tool).baseName().toLower();
+			if (name.startsWith("python") || name.startsWith("pypy"))
+				runtime = SandboxSettings::Python;
+			else if (name == "java")
+				runtime = SandboxSettings::Java;
+			else
+				runtime = SandboxSettings::Native;
+		}
+
+		QStringList roots;
+		if (! prepareRuntimePermissions(tool, roots) || ! preparePrivateFiles())
+			return false;
+
 		const auto system = QProcessEnvironment::systemEnvironment();
 		// Preserve explicitly configured variables, not the host's entire environment.
 		childEnvironment = config.runtimeEnvironment;
 		for (const auto &name :
-		     {"SystemRoot", "WINDIR", "SystemDrive", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"})
+		     {"SystemRoot", "WINDIR", "SystemDrive", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE"}) {
 			if (system.contains(name))
 				childEnvironment.insert(name, system.value(name));
+		}
+
 		QStringList path;
 		if (! tool.isEmpty())
 			path.append(QFileInfo(tool).absolutePath());
-		for (const auto &root : seen) {
+		for (const auto &root : roots) {
 			path.append(root);
 			if (QFileInfo::exists(root + "/bin"))
 				path.append(root + "/bin");
@@ -610,10 +707,10 @@ struct WindowsSandbox::Data {
 		path.append(system.value("SystemRoot") + "/System32");
 		path.removeDuplicates();
 		childEnvironment.insert("PATH", QDir::toNativeSeparators(path.join(';')));
-		for (const auto &name : {"TEMP", "TMP"})
-			childEnvironment.insert(name, QDir::toNativeSeparators(work + "/.sandbox-tmp"));
-		for (const auto &name : {"USERPROFILE", "LOCALAPPDATA", "APPDATA"})
-			childEnvironment.insert(name, QDir::toNativeSeparators(work + "/.sandbox-home"));
+
+		// Avoid ERROR_ENVVAR_NOT_FOUND during AppContainer creation when LOCALAPPDATA is absent.
+		if (! childEnvironment.contains("LOCALAPPDATA"))
+			childEnvironment.insert("LOCALAPPDATA", QDir::toNativeSeparators(workingDirectory));
 		return checkBudget();
 	}
 };
@@ -628,21 +725,16 @@ std::shared_ptr<WindowsSandboxSession> WindowsSandbox::createSession() {
 	return session;
 }
 
-WindowsSandbox::WindowsSandbox(const ProcessRunnerConfig &config, const std::atomic<bool> &stop)
-    : data(std::make_unique<Data>(config, stop)) {}
+WindowsSandbox::WindowsSandbox(const ProcessRunnerConfig &config) : data(std::make_unique<Data>(config)) {}
 WindowsSandbox::~WindowsSandbox() = default;
 bool WindowsSandbox::prepare(QString &error) {
 	const bool result = data->prepare();
 	error = data->error;
 	return result;
 }
+
 bool WindowsSandbox::prepareProcess(STARTUPINFOEXW &startup, QString &error) {
 	const bool result = data->prepareProcess(startup);
-	error = data->error;
-	return result;
-}
-bool WindowsSandbox::stopProcesses(QString &error) {
-	const bool result = data->stopProcesses();
 	error = data->error;
 	return result;
 }

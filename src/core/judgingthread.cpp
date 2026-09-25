@@ -105,8 +105,6 @@ auto JudgingThread::getMessage() const -> const QString & { return message; }
 
 auto JudgingThread::getNeedRejudge() const -> bool { return needRejudge; }
 
-void JudgingThread::stopJudgingSlot() { stopJudging = true; }
-
 // Chunked file reader used by the line/space comparators below.
 //
 // nextUntilNewLine() / nextUntilSpace() return at most 32 chars per call --
@@ -785,7 +783,6 @@ void JudgingThread::judgeTraditionalTask() {
 	cfg.runtimeExecutable = runtimeExecutable;
 	cfg.runtimeEnvironment = runtimeEnvironment;
 	cfg.sandboxSession = sandboxSession;
-	cfg.preparationProgress = [this](const QString &text) { emit preparationProgress(text); };
 
 	auto processRunner = ProcessRunner::create(cfg, stopJudging);
 	auto runResult = processRunner->run();

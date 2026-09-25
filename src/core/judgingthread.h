@@ -96,10 +96,4 @@ class JudgingThread : public QThread {
 	void judgeTraditionalTask();
 	void judgeAnswersOnlyTask();
 	// void judgeInteractionTask();
-
-  public slots:
-	void stopJudgingSlot();
-
-  signals:
-	void preparationProgress(const QString &message);
 };

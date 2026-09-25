@@ -16,6 +16,7 @@
 #include <Psapi.h>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -25,6 +26,58 @@
 #include <winsock2.h>
 
 using namespace Lemon::Windows;
+
+namespace {
+	QString quoteArgument(const QString &argument) {
+		QString result = "\"";
+		int slashes = 0;
+		for (QChar c : argument) {
+			if (c == '\\') {
+				++slashes;
+				continue;
+			}
+			result += QString(c == '"' ? slashes * 2 + 1 : slashes, '\\');
+			result += c;
+			slashes = 0;
+		}
+		return result + QString(slashes * 2, '\\') + '"';
+	}
+
+	QString currentUserSid() {
+		Handle token;
+		if (! OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, token.put()))
+			qFatal("Cannot open test process token");
+		DWORD size = 0;
+		GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
+		QByteArray information(size, Qt::Uninitialized);
+		if (! GetTokenInformation(token.get(), TokenUser, information.data(), size, &size))
+			qFatal("Cannot read test process user");
+		LocalMemory<LPWSTR> sid;
+		if (! ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(information.data())->User.Sid, sid.put()))
+			qFatal("Cannot serialize test process user");
+		return QString::fromWCharArray(sid.get());
+	}
+
+	bool setPermissions(const QString &path, const QString &sddl, bool protectedAcl = true) {
+		LocalMemory<PSECURITY_DESCRIPTOR> descriptor;
+		if (! ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(sddl), SDDL_REVISION_1,
+		                                                           descriptor.put(), nullptr)) {
+			return false;
+		}
+		PACL acl = nullptr;
+		BOOL present = FALSE, defaulted = FALSE;
+		if (! GetSecurityDescriptorDacl(descriptor.get(), &present, &acl, &defaulted) || ! present)
+			return false;
+		Handle file(CreateFileW(wide(QDir::toNativeSeparators(path)), MAXIMUM_ALLOWED,
+		                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		                        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+		return file && SetSecurityInfo(file.get(), SE_FILE_OBJECT,
+		                               DACL_SECURITY_INFORMATION |
+		                                   (protectedAcl ? PROTECTED_DACL_SECURITY_INFORMATION
+		                                                 : UNPROTECTED_DACL_SECURITY_INFORMATION),
+		                               nullptr, nullptr, acl, nullptr) == ERROR_SUCCESS;
+	}
+} // namespace
 
 class WindowsSandboxTests : public QObject {
 	Q_OBJECT
@@ -38,30 +91,32 @@ class WindowsSandboxTests : public QObject {
 		QFile file(path);
 		return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
 	}
+
 	static QByteArray read(const QString &path) {
 		QFile file(path);
 		if (! file.open(QIODevice::ReadOnly))
 			return {};
 		return file.readAll();
 	}
+
 	static QString permissions(const QString &path) {
-		PSECURITY_DESCRIPTOR descriptor = nullptr;
+		LocalMemory<PSECURITY_DESCRIPTOR> descriptor;
 		const auto native = QDir::toNativeSeparators(path);
 		if (GetNamedSecurityInfoW(const_cast<wchar_t *>(wide(native)), SE_FILE_OBJECT,
 		                          DACL_SECURITY_INFORMATION, nullptr, nullptr, nullptr, nullptr,
-		                          &descriptor) != ERROR_SUCCESS)
+		                          descriptor.put()) != ERROR_SUCCESS) {
 			qFatal("Cannot read test ACL");
+		}
 		// Windows may mark a rewritten DACL as auto-inherited. Compare its ACEs and protection state.
-		SetSecurityDescriptorControl(descriptor, SE_DACL_AUTO_INHERITED, 0);
-		wchar_t *text = nullptr;
-		if (! ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SDDL_REVISION_1,
-		                                                           DACL_SECURITY_INFORMATION, &text, nullptr))
+		SetSecurityDescriptorControl(descriptor.get(), SE_DACL_AUTO_INHERITED, 0);
+		LocalMemory<LPWSTR> text;
+		if (! ConvertSecurityDescriptorToStringSecurityDescriptorW(
+		        descriptor.get(), SDDL_REVISION_1, DACL_SECURITY_INFORMATION, text.put(), nullptr)) {
 			qFatal("Cannot serialize test ACL");
-		const auto result = QString::fromWCharArray(text);
-		LocalFree(text);
-		LocalFree(descriptor);
-		return result;
+		}
+		return QString::fromWCharArray(text.get());
 	}
+
 	static bool createJunction(const QString &link, const QString &target) {
 		auto environment = QProcessEnvironment::systemEnvironment();
 		environment.insert("LEMON_TEST_LINK", QDir::toNativeSeparators(link));
@@ -73,6 +128,7 @@ class WindowsSandboxTests : public QObject {
 		process.start();
 		return process.waitForFinished(5000) && process.exitCode() == 0;
 	}
+
 	ProcessRunnerConfig config(const QString &arguments) {
 		ProcessRunnerConfig cfg;
 		cfg.workingDirectory = root.path() + QString("/case-%1/").arg(++sequence);
@@ -90,18 +146,43 @@ class WindowsSandboxTests : public QObject {
 		cfg.extraTimeRatio = 0.2;
 		return cfg;
 	}
+
 	ProcessRunnerResult run(ProcessRunnerConfig cfg) {
 		std::atomic<bool> stop{false};
 		return ProcessRunner::create(std::move(cfg), stop)->run();
 	}
-	void allowChildren(ProcessRunnerConfig &cfg) {
-		const auto runtime = root.path() + "/fake-java";
-		QDir().mkpath(runtime + "/bin");
-		QDir().mkpath(runtime + "/lib");
-		if (! QFileInfo::exists(runtime + "/bin/helper.exe"))
-			QFile::copy(QDir::currentPath() + "/sandbox-helper.exe", runtime + "/bin/helper.exe");
-		cfg.runtimeExecutable = runtime + "/bin/helper.exe";
-		cfg.sandboxSettings.runtime = SandboxSettings::Java;
+
+	void configureRuntimeFixture(ProcessRunnerConfig &cfg, SandboxSettings::Runtime runtime) {
+		cfg.sandboxSettings.runtime = runtime;
+		if (runtime != SandboxSettings::Java && runtime != SandboxSettings::Python)
+			return;
+		const auto directory =
+		    root.path() + (runtime == SandboxSettings::Java ? "/fake-java" : "/fake-python");
+		if (runtime == SandboxSettings::Java) {
+			QDir().mkpath(directory + "/bin");
+			QDir().mkpath(directory + "/lib");
+			cfg.runtimeExecutable = directory + "/bin/helper.exe";
+		} else {
+			QDir().mkpath(directory);
+			cfg.runtimeExecutable = directory + "/python.exe";
+		}
+		if (! QFileInfo::exists(cfg.runtimeExecutable) &&
+		    ! QFile::copy(QDir::currentPath() + "/sandbox-helper.exe", cfg.runtimeExecutable)) {
+			qFatal("Cannot copy runtime discovery fixture");
+		}
+	}
+
+	QString basePythonExecutable() const {
+		// Resolve the installed interpreter through a trusted host-side probe, including launcher entries.
+		QProcess probe;
+		probe.start(python, {"-I", "-S", "-c", "import sys,json;print(json.dumps([sys._base_executable]))"});
+		if (! probe.waitForFinished(10000) || probe.exitStatus() != QProcess::NormalExit ||
+		    probe.exitCode() != 0) {
+			qWarning() << "Cannot locate the base Python interpreter:" << probe.readAllStandardError();
+			return {};
+		}
+		const auto values = QJsonDocument::fromJson(probe.readAllStandardOutput()).array();
+		return values.size() == 1 ? QFileInfo(values[0].toString()).canonicalFilePath() : QString{};
 	}
 
   private slots:
@@ -114,6 +195,7 @@ class WindowsSandboxTests : public QObject {
 		java = QStandardPaths::findExecutable("java");
 		javac = QStandardPaths::findExecutable("javac");
 	}
+
 	void disabledByDefault() {
 		auto cfg = config("host " + quoteArgument(root.path() + "/secret.txt"));
 		cfg.sandboxSettings = SandboxSettings{};
@@ -121,33 +203,99 @@ class WindowsSandboxTests : public QObject {
 		cfg.runtimeExecutable = root.path() + "/missing-runtime.exe";
 		cfg.sandboxSettings.readOnlyDirectories = {root.path()};
 		cfg.environment.insert("LEMON_SANDBOX_TEST", "preserved");
-		bool prepared = false;
-		cfg.preparationProgress = [&](const QString &) { prepared = true; };
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("host"));
 		QCOMPARE(result.preparationTime, 0);
 		QCOMPARE(result.runtimeAclUpdates, 0);
-		QVERIFY(! prepared);
 		QVERIFY(! cfg.sandboxSession);
 		QVERIFY(! QFileInfo::exists(cfg.workingDirectory + ".sandbox-home"));
 		cfg.arguments = "spawn 100";
 		const auto child = run(cfg);
 		QVERIFY2(child.result == CorrectAnswer, qPrintable(child.message));
 	}
+
 	void standardIo() {
 		auto cfg = config("sum");
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("42"));
 		QVERIFY(result.memoryUsed > 0);
 	}
+
+	void commandLineArguments_data() {
+		QTest::addColumn<bool>("enabled");
+		QTest::newRow("ordinary") << false;
+		QTest::newRow("sandbox") << true;
+	}
+
+	void commandLineArguments() {
+		QFETCH(bool, enabled);
+		const QStringList arguments = {"",
+		                               "with spaces",
+		                               "embedded\"quote",
+		                               "trailing space\\",
+		                               "backslash\\\"quote",
+		                               "two trailing\\\\"};
+		QString command = "arguments";
+		for (const auto &argument : arguments)
+			command += ' ' + quoteArgument(argument);
+		auto cfg = config(command);
+		cfg.sandboxSettings.enabled = enabled;
+		const auto executable = cfg.workingDirectory + "helper with spaces.exe";
+		QVERIFY(QFile::rename(cfg.executableFile, executable));
+		cfg.executableFile = executable;
+
+		const auto result = run(cfg);
+		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").replace("\r\n", "\n"),
+		         arguments.join('\n').toUtf8() + '\n');
+	}
+
+	void runtimeAceOrder_data() {
+		QTest::addColumn<QString>("entries");
+		QTest::addColumn<int>("updates");
+		QTest::newRow("allow-before-inherited-deny") << "(A;;FRFX;;;S-1-15-2-1)(D;ID;FRFX;;;S-1-15-2-1)" << 0;
+		QTest::newRow("partial-allow-before-deny-of-granted-rights")
+		    << "(A;;FR;;;S-1-15-2-1)(D;ID;FR;;;S-1-15-2-1)(A;ID;FX;;;S-1-15-2-1)" << 0;
+		QTest::newRow("deny-of-remaining-rights")
+		    << "(A;;FR;;;S-1-15-2-1)(D;ID;FX;;;S-1-15-2-1)(A;ID;FX;;;S-1-15-2-1)" << 1;
+	}
+
+	void runtimeAceOrder() {
+		QFETCH(QString, entries);
+		QFETCH(int, updates);
+		auto cfg = config("sum");
+		const auto directory = root.path() + QString("/ace-order-%1").arg(++sequence);
+		const auto file = directory + "/resource.txt";
+		QVERIFY(QDir().mkpath(directory));
+		QVERIFY(write(file, "runtime data"));
+		const auto base = QString("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;%1)").arg(currentUserSid());
+		QVERIFY(setPermissions(directory, base + "(A;;FRFX;;;S-1-15-2-1)"));
+		QVERIFY(setPermissions(file, base + entries));
+		const auto before = permissions(file);
+		cfg.sandboxSettings.readOnlyDirectories = {directory};
+		{
+			WindowsSandbox sandbox(cfg);
+			QString error;
+			QVERIFY2(sandbox.prepare(error), qPrintable(error));
+			QCOMPARE(sandbox.aclUpdates(), updates);
+			if (updates == 0)
+				QCOMPARE(permissions(file), before);
+			else
+				QVERIFY(permissions(file) != before);
+		}
+		QCOMPARE(permissions(file), before);
+	}
+
 	void nestedFileIo_data() {
 		QTest::addColumn<bool>("enabled");
 		QTest::addColumn<bool>("standardInput");
 		QTest::addColumn<bool>("standardOutput");
-		for (bool enabled : {false, true})
-			for (bool input : {false, true})
+		for (bool enabled : {false, true}) {
+			for (bool input : {false, true}) {
 				for (bool output : {false, true}) {
 					const auto name = QString("%1-input%2-output%3")
 					                      .arg(enabled ? "sandbox" : "ordinary")
@@ -155,7 +303,10 @@ class WindowsSandboxTests : public QObject {
 					                      .arg(output);
 					QTest::newRow(qPrintable(name)) << enabled << input << output;
 				}
+			}
+		}
 	}
+
 	void nestedFileIo() {
 		QFETCH(bool, enabled);
 		QFETCH(bool, standardInput);
@@ -169,11 +320,13 @@ class WindowsSandboxTests : public QObject {
 		cfg.outputFileName = "files/output.txt";
 		QVERIFY(QDir(cfg.workingDirectory).mkdir("files"));
 		QVERIFY(QFile::copy(cfg.inputFile, cfg.workingDirectory + cfg.inputFileName));
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		const auto output = cfg.standardOutputCheck ? QString("_tmpout") : cfg.outputFileName;
 		QCOMPARE(read(cfg.workingDirectory + output).trimmed(), QByteArray("42"));
 	}
+
 	void isolationAndHandles() {
 		SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
 		Handle secret(CreateFileW(wide(root.path() + "/secret.txt"), GENERIC_READ, FILE_SHARE_READ,
@@ -181,11 +334,13 @@ class WindowsSandboxTests : public QObject {
 		QVERIFY(bool(secret));
 		auto cfg = config("isolation " + quoteArgument(root.path() + "/secret.txt") + ' ' +
 		                  QString::number(quintptr(secret.get())));
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("isolated"));
 		QVERIFY(QFileInfo::exists(cfg.workingDirectory + "own.txt"));
 	}
+
 	void runtimeCache() {
 		auto session = WindowsSandbox::createSession();
 		const auto directory = root.path() + "/runtime";
@@ -207,6 +362,7 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(warm.runtimeAclUpdates, 0);
 		qInfo() << "Runtime preparation cold/warm ms:" << cold.preparationTime << warm.preparationTime;
 	}
+
 	void permissionsAreRestored() {
 		const auto directory = root.path() + "/temporary-runtime";
 		QVERIFY(QDir().mkpath(directory));
@@ -215,6 +371,7 @@ class WindowsSandboxTests : public QObject {
 		const auto beforeFile = permissions(directory + "/resource.txt");
 		auto cfg = config("runtime " + quoteArgument(directory + "/resource.txt"));
 		cfg.sandboxSettings.readOnlyDirectories = {directory};
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		QCOMPARE(permissions(directory), beforeDirectory);
@@ -228,6 +385,7 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(permissions(directory + "/resource.txt"), beforeFile);
 		QVERIFY(QDir(cfg.workingDirectory).removeRecursively());
 	}
+
 	void sharedPermissionsLifetime() {
 		const auto directory = root.path() + "/shared-runtime";
 		QVERIFY(QDir().mkpath(directory));
@@ -237,9 +395,8 @@ class WindowsSandboxTests : public QObject {
 		auto second = config("sum");
 		first.sandboxSettings.readOnlyDirectories = {directory};
 		second.sandboxSettings = first.sandboxSettings;
-		std::atomic<bool> stop{false};
-		auto one = std::make_unique<WindowsSandbox>(first, stop);
-		auto two = std::make_unique<WindowsSandbox>(second, stop);
+		auto one = std::make_unique<WindowsSandbox>(first);
+		auto two = std::make_unique<WindowsSandbox>(second);
 		QString error;
 		QVERIFY2(one->prepare(error), qPrintable(error));
 		QVERIFY2(two->prepare(error), qPrintable(error));
@@ -251,6 +408,88 @@ class WindowsSandboxTests : public QObject {
 		two.reset();
 		QCOMPARE(permissions(directory + "/resource.txt"), before);
 	}
+
+	void workPermissionsArePreserved_data() {
+		QTest::addColumn<bool>("protectedAcl");
+		QTest::newRow("inherited") << false;
+		QTest::newRow("protected") << true;
+	}
+
+	void workPermissionsArePreserved() {
+		QFETCH(bool, protectedAcl);
+		auto cfg = config("work-files");
+		const auto sddl = QString("D:(A;OICI;FA;;;%1)(A;OICI;FR;;;S-1-15-2-123456789)").arg(currentUserSid());
+		QVERIFY(setPermissions(cfg.workingDirectory, sddl, protectedAcl));
+		QVERIFY(QDir(cfg.workingDirectory).mkdir("existing"));
+		QVERIFY(write(cfg.workingDirectory + "existing/data.txt", "existing data"));
+		const QStringList existing{cfg.workingDirectory, cfg.executableFile,
+		                           cfg.workingDirectory + "existing",
+		                           cfg.workingDirectory + "existing/data.txt"};
+		QStringList before;
+		for (const auto &path : existing)
+			before.append(permissions(path));
+
+		const auto result = run(cfg);
+		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		for (int i = 0; i < existing.size(); ++i)
+			QCOMPARE(permissions(existing[i]), before[i]);
+		QCOMPARE(read(cfg.workingDirectory + "created/nested/data.txt"), QByteArray("created"));
+		for (const auto &name :
+		     {"created", "created/nested", "created/nested/data.txt", "_tmpout", "_tmperr"}) {
+			const auto acl = permissions(cfg.workingDirectory + name);
+			QVERIFY(acl.contains("S-1-15-2-123456789"));
+			QCOMPARE(acl.count("S-1-15-2-"), 1);
+		}
+		QVERIFY(QDir(cfg.workingDirectory).removeRecursively());
+	}
+
+	void namedInputIsReadOnly() {
+		auto cfg = config("runtime files/input.txt");
+		cfg.standardInputCheck = false;
+		cfg.inputFileName = "files/input.txt";
+		QVERIFY(QDir(cfg.workingDirectory).mkdir("files"));
+		QVERIFY(QFile::copy(cfg.inputFile, cfg.workingDirectory + cfg.inputFileName));
+		const auto before = permissions(cfg.workingDirectory + cfg.inputFileName);
+
+		const auto result = run(cfg);
+		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("readonly"));
+		QCOMPARE(read(cfg.workingDirectory + cfg.inputFileName), read(cfg.inputFile));
+		QCOMPARE(permissions(cfg.workingDirectory + cfg.inputFileName), before);
+	}
+
+	void inputRestorationPreservesRuntimeGrants() {
+		auto session = WindowsSandbox::createSession();
+		auto first = config("sum");
+		first.sandboxSession = session;
+		first.standardInputCheck = false;
+		first.inputFileName = "input.txt";
+		const auto input = first.workingDirectory + first.inputFileName;
+		QVERIFY(QFile::copy(first.inputFile, input));
+		const auto before = permissions(input);
+		auto one = std::make_unique<WindowsSandbox>(first);
+		QString error;
+		QVERIFY2(one->prepare(error), qPrintable(error));
+
+		auto second = config("runtime " + quoteArgument(input));
+		second.sandboxSession = session;
+		second.sandboxSettings.readOnlyDirectories = {first.workingDirectory};
+		auto two = std::make_unique<WindowsSandbox>(second);
+		QVERIFY2(two->prepare(error), qPrintable(error));
+		one.reset();
+
+		const auto result = run(second);
+		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		QVERIFY(result.runtimeCacheHit);
+		QCOMPARE(result.runtimeAclUpdates, 0);
+		QCOMPARE(read(second.workingDirectory + "_tmpout").trimmed(), QByteArray("readonly"));
+		two.reset();
+		first.sandboxSession.reset();
+		second.sandboxSession.reset();
+		session.reset();
+		QCOMPARE(permissions(input), before);
+	}
+
 	void runtimeJunction_data() {
 		QTest::addColumn<QString>("subdirectory");
 		QTest::addColumn<bool>("chained");
@@ -258,6 +497,7 @@ class WindowsSandboxTests : public QObject {
 		QTest::newRow("ancestor") << QString("/bin") << false;
 		QTest::newRow("chained") << QString("/bin") << true;
 	}
+
 	void runtimeJunction() {
 		auto session = WindowsSandbox::createSession();
 		QFETCH(QString, subdirectory);
@@ -282,6 +522,7 @@ class WindowsSandboxTests : public QObject {
 		QVERIFY(repeated.runtimeCacheHit);
 		QCOMPARE(repeated.runtimeAclUpdates, 0);
 	}
+
 	void runtimeInsideWorkingDirectory() {
 		auto cfg = config("sum");
 		QVERIFY(QDir().mkpath(cfg.workingDirectory + "nested"));
@@ -290,16 +531,19 @@ class WindowsSandboxTests : public QObject {
 		cfg.sandboxSettings.readOnlyDirectories = {link + "/nested"};
 		QCOMPARE(run(cfg).result, CorrectAnswer);
 	}
+
 	void unavailableRuntime() {
 		auto cfg = config("sum");
 		cfg.runtimeExecutable = root.path() + "/missing.exe";
 		QCOMPARE(run(cfg).result, CannotStartProgram);
 	}
+
 	void unavailableJunction_data() {
 		QTest::addColumn<bool>("cycle");
 		QTest::newRow("missing-target") << false;
 		QTest::newRow("cycle") << true;
 	}
+
 	void unavailableJunction() {
 		QFETCH(bool, cycle);
 		auto cfg = config("sum");
@@ -314,6 +558,7 @@ class WindowsSandboxTests : public QObject {
 		if (cycle)
 			QVERIFY(QDir().rmdir(target));
 	}
+
 	void sharedCompilerCache() {
 		auto session = WindowsSandbox::createSession();
 		const auto directory = root.path() + "/compilers";
@@ -339,6 +584,7 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(updated.result, CorrectAnswer);
 		QVERIFY(! updated.runtimeCacheHit);
 	}
+
 	void parallelRuntimeCache() {
 		auto session = WindowsSandbox::createSession();
 		const auto directory = root.path() + "/parallel-runtime";
@@ -359,6 +605,7 @@ class WindowsSandboxTests : public QObject {
 		QVERIFY(one.runtimeCacheHit != two.runtimeCacheHit);
 		QVERIFY((one.runtimeAclUpdates == 0) != (two.runtimeAclUpdates == 0));
 	}
+
 	void networkDenied() {
 		WSADATA data{};
 		QCOMPARE(WSAStartup(MAKEWORD(2, 2), &data), 0);
@@ -375,24 +622,40 @@ class WindowsSandboxTests : public QObject {
 		SOCKET accepted = accept(server, nullptr, nullptr);
 		closesocket(accepted);
 		closesocket(control);
+
 		const auto result = run(config("network " + QString::number(ntohs(address.sin_port))));
 		closesocket(server);
 		WSACleanup();
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 	}
-	void nativeChildDenied() {
-		const auto result = run(config("deny-child"));
-		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+
+	void childProcessDenied_data() {
+		QTest::addColumn<int>("runtime");
+		QTest::newRow("automatic") << int(SandboxSettings::Automatic);
+		QTest::newRow("native") << int(SandboxSettings::Native);
+		QTest::newRow("java") << int(SandboxSettings::Java);
+		QTest::newRow("python") << int(SandboxSettings::Python);
 	}
+
+	void childProcessDenied() {
+		QFETCH(int, runtime);
+		auto cfg = config("deny-child");
+		configureRuntimeFixture(cfg, SandboxSettings::Runtime(runtime));
+
+		const auto result = run(cfg);
+		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		QVERIFY(read(cfg.workingDirectory + "_tmpout").startsWith("child-denied="));
+	}
+
 	void primaryProcessAccounting_data() {
 		QTest::addColumn<bool>("enabled");
 		QTest::newRow("ordinary") << false;
 		QTest::newRow("sandbox") << true;
 	}
+
 	void primaryProcessAccounting() {
 		QFETCH(bool, enabled);
-		auto cfg = config("spawn 600 metrics");
-		allowChildren(cfg);
+		auto cfg = config("metrics 600");
 		cfg.sandboxSettings.enabled = enabled;
 		ProcessRunnerResult result;
 		std::thread worker([&] { result = run(cfg); });
@@ -400,11 +663,12 @@ class WindowsSandboxTests : public QObject {
 		QElapsedTimer timer;
 		timer.start();
 		while (! primary && timer.elapsed() < 5000) {
-			const auto match = QRegularExpression("parent=(\\d+)")
+			const auto match = QRegularExpression("process=(\\d+)")
 			                       .match(QString::fromUtf8(read(cfg.workingDirectory + "_tmpout")));
-			if (match.hasMatch())
+			if (match.hasMatch()) {
 				primary.reset(OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE,
 				                          match.captured(1).toULong()));
+			}
 			if (! primary)
 				QThread::msleep(10);
 		}
@@ -415,6 +679,7 @@ class WindowsSandboxTests : public QObject {
 		QVERIFY(GetProcessTimes(primary.get(), &created, &exited, &kernel, &user));
 		const quint64 userTicks = (quint64(user.dwHighDateTime) << 32) | user.dwLowDateTime;
 		const quint64 kernelTicks = (quint64(kernel.dwHighDateTime) << 32) | kernel.dwLowDateTime;
+		QVERIFY(userTicks > 0);
 		QVERIFY(kernelTicks > 0);
 		QCOMPARE(result.timeUsed, int(userTicks / 10000));
 		PROCESS_MEMORY_COUNTERS memory{};
@@ -423,17 +688,20 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(result.memoryUsed, qint64(memory.PeakWorkingSetSize));
 		QVERIFY(result.memoryUsed < 64ll * 1024 * 1024);
 	}
+
 	void runtimeErrorDetails_data() { primaryProcessAccounting_data(); }
 	void runtimeErrorDetails() {
 		QFETCH(bool, enabled);
 		auto cfg = config("stderr");
 		cfg.sandboxSettings.enabled = enabled;
+
 		const auto result = run(cfg);
 		QCOMPARE(result.result, RunTimeError);
 		QCOMPARE(result.timeUsed, -1);
 		QCOMPARE(result.memoryUsed, -1);
 		QCOMPARE(result.message, QString(1020, 'a') + "tail");
 	}
+
 	void limits() {
 		auto cpu = config("burn 3000");
 		cpu.timeLimit = 100;
@@ -442,29 +710,41 @@ class WindowsSandboxTests : public QObject {
 		memory.memoryLimit = 24;
 		QCOMPARE(run(memory).result, MemoryLimitExceeded);
 	}
+
 	void cancellation() {
-		auto cfg = config("spawn 10000");
-		allowChildren(cfg);
-		const auto beforeRuntime = permissions(cfg.runtimeExecutable);
+		auto cfg = config("burn 10000");
+		const auto directory = root.path() + "/cancellation-runtime";
+		QVERIFY(QDir().mkpath(directory));
+		const auto resource = directory + "/resource.txt";
+		QVERIFY(write(resource, "runtime resource"));
+		cfg.sandboxSettings.readOnlyDirectories = {directory};
+		const auto beforeRuntime = permissions(resource);
 		std::atomic<bool> stop{false};
+		Handle primary;
 		std::thread cancel([&] {
-			QThread::msleep(300);
+			QElapsedTimer timer;
+			timer.start();
+			while (! primary && timer.elapsed() < 5000) {
+				const auto match = QRegularExpression("process=(\\d+)")
+				                       .match(QString::fromUtf8(read(cfg.workingDirectory + "_tmpout")));
+				if (match.hasMatch())
+					primary.reset(OpenProcess(SYNCHRONIZE, FALSE, match.captured(1).toULong()));
+				if (! primary)
+					QThread::msleep(10);
+			}
 			stop = true;
 		});
 		const auto result = ProcessRunner::create(cfg, stop)->run();
 		cancel.join();
-		QCOMPARE(permissions(cfg.runtimeExecutable), beforeRuntime);
+		QVERIFY(bool(primary));
+		QCOMPARE(WaitForSingleObject(primary.get(), 0), DWORD(WAIT_OBJECT_0));
+		QCOMPARE(permissions(resource), beforeRuntime);
 		QVERIFY(! permissions(cfg.workingDirectory).contains("S-1-15-2-"));
 		QCOMPARE(result.result, CorrectAnswer);
 		QCOMPARE(result.timeUsed, -1);
 		QCOMPARE(result.memoryUsed, -1);
-		const auto match = QRegularExpression("child=(\\d+)")
-		                       .match(QString::fromUtf8(read(cfg.workingDirectory + "_tmpout")));
-		if (match.hasMatch()) {
-			Handle child(OpenProcess(SYNCHRONIZE, FALSE, match.captured(1).toULong()));
-			QVERIFY(! child || WaitForSingleObject(child.get(), 0) == WAIT_OBJECT_0);
-		}
 	}
+
 	void runtimeDirectoryWithInput() {
 		auto cfg = config("sum");
 		const auto directory = root.path() + "/runtime-with-input";
@@ -475,25 +755,59 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(run(cfg).result, CorrectAnswer);
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("42"));
 	}
+
 	void rejectHardLinkedWorkFile() {
 		auto cfg = config("sum");
 		const auto target = root.path() + "/secret.txt";
 		QVERIFY(CreateHardLinkW(wide(cfg.workingDirectory + "linked.txt"), wide(target), nullptr));
+		const auto beforeDirectory = permissions(cfg.workingDirectory);
+		const auto beforeExecutable = permissions(cfg.executableFile);
+
 		const auto result = run(cfg);
 		QCOMPARE(result.result, CannotStartProgram);
 		QCOMPARE(read(target), QByteArray("secret answer\n"));
+		QCOMPARE(permissions(cfg.workingDirectory), beforeDirectory);
+		QCOMPARE(permissions(cfg.executableFile), beforeExecutable);
 	}
-	void preparationDeadlineAndCancellation() {
+
+	void preparationDeadlineIgnoresStopFlag() {
 		auto cfg = config("sum");
-		cfg.sandboxSettings.preparationTimeLimit = 1;
+		cfg.runtimeExecutable = root.path() + "/slow-python.exe";
+		QVERIFY(QFile::copy(QDir::currentPath() + "/sandbox-helper.exe", cfg.runtimeExecutable));
+		cfg.sandboxSettings.runtime = SandboxSettings::Python;
+		cfg.sandboxSettings.preparationTimeLimit = 250;
+		const auto before = permissions(cfg.runtimeExecutable);
 		const auto limited = run(cfg);
 		QCOMPARE(limited.result, CannotStartProgram);
 		QVERIFY(limited.message.contains("preparation exceeded"));
+		const auto marker = cfg.runtimeExecutable + ".started";
+		QVERIFY(! QFileInfo::exists(marker) || QFile::remove(marker));
 		std::atomic<bool> stop{false};
-		cfg.sandboxSettings.preparationTimeLimit = 15000;
-		cfg.preparationProgress = [&](const QString &) { stop = true; };
-		QCOMPARE(ProcessRunner::create(cfg, stop)->run().result, CorrectAnswer);
+		cfg.sandboxSettings.preparationTimeLimit = 1000;
+		DWORD probeId = 0;
+		std::thread cancel([&] {
+			QElapsedTimer timer;
+			timer.start();
+			while (! probeId && timer.elapsed() < 5000) {
+				probeId = read(marker).trimmed().toULong();
+				if (! probeId)
+					QThread::msleep(10);
+			}
+			stop = true;
+		});
+		const auto limitedWithStop = ProcessRunner::create(cfg, stop)->run();
+		cancel.join();
+		QVERIFY(probeId != 0);
+		QCOMPARE(limitedWithStop.result, CannotStartProgram);
+		QVERIFY(limitedWithStop.message.contains("preparation exceeded"));
+		QVERIFY(limitedWithStop.preparationTime >= cfg.sandboxSettings.preparationTimeLimit);
+		QCOMPARE(limitedWithStop.timeUsed, -1);
+		QCOMPARE(limitedWithStop.runtimeAclUpdates, 0);
+		QCOMPARE(permissions(cfg.runtimeExecutable), before);
+		Handle probe(OpenProcess(SYNCHRONIZE, FALSE, probeId));
+		QVERIFY(! probe || WaitForSingleObject(probe.get(), 0) == WAIT_OBJECT_0);
 	}
+
 	void parallelIsolation() {
 		auto first = config({});
 		auto second = config({});
@@ -510,12 +824,14 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(read(first.workingDirectory + "_tmpout").trimmed(), QByteArray("isolated"));
 		QCOMPARE(read(second.workingDirectory + "_tmpout").trimmed(), QByteArray("isolated"));
 	}
+
 	void nativeCompiler_data() {
 		QTest::addColumn<QString>("compiler");
 		QTest::addColumn<QString>("extension");
 		QTest::newRow("C") << "gcc" << "c";
 		QTest::newRow("C++") << "g++" << "cpp";
 	}
+
 	void nativeCompiler() {
 		QFETCH(QString, compiler);
 		QFETCH(QString, extension);
@@ -535,10 +851,12 @@ class WindowsSandboxTests : public QObject {
 		compile.start(tool, {source, "-O2", "-o", cfg.executableFile});
 		QVERIFY(compile.waitForFinished(20000));
 		QVERIFY2(compile.exitCode() == 0, compile.readAllStandardError().constData());
+
 		const auto result = run(cfg);
 		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("42"));
 	}
+
 	void settingsRoundTrip() {
 		SandboxSettings settings;
 		QVERIFY(! settings.enabled);
@@ -559,13 +877,16 @@ class WindowsSandboxTests : public QObject {
 		QCOMPARE(restored.runtime, SandboxSettings::Automatic);
 		QCOMPARE(restored.preparationTimeLimit, 1000);
 	}
+
 	void pythonRuntime() {
 		auto session = WindowsSandbox::createSession();
 		if (python.isEmpty())
 			QSKIP("Python not installed");
+		const auto interpreter = basePythonExecutable();
+		QVERIFY2(! interpreter.isEmpty(), "Cannot locate the base Python interpreter");
 		auto cfg = config({});
 		cfg.sandboxSession = session;
-		cfg.executableFile = cfg.runtimeExecutable = python;
+		cfg.executableFile = cfg.runtimeExecutable = interpreter;
 		cfg.arguments = "answer.py";
 		cfg.sandboxSettings.runtime = SandboxSettings::Python;
 		cfg.runtimeEnvironment.insert("PYTHONIOENCODING", "cp1252");
@@ -576,15 +897,47 @@ class WindowsSandboxTests : public QObject {
 		              "with tempfile.TemporaryFile() as f: f.write(b'private')\n"
 		              "print(sum(map(int,sys.stdin.read().split())), end=' ')\n"
 		              "print('\\u00e9', end='')\n"));
+
 		const auto first = run(cfg);
 		QVERIFY2(first.result == CorrectAnswer, qPrintable(first.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout"), QByteArray("42 \xe9"));
+
 		const auto second = run(cfg);
 		QVERIFY2(second.result == CorrectAnswer, qPrintable(second.message));
 		QVERIFY(second.runtimeCacheHit);
 		QCOMPARE(second.runtimeAclUpdates, 0);
 		qInfo() << "Python preparation cold/warm ms:" << first.preparationTime << second.preparationTime;
 	}
+
+	void pythonChildDenied() {
+		if (python.isEmpty())
+			QSKIP("Python not installed");
+		const auto interpreter = basePythonExecutable();
+		QVERIFY2(! interpreter.isEmpty(), "Cannot locate the base Python interpreter");
+		auto cfg = config("child.py");
+		cfg.executableFile = cfg.runtimeExecutable = interpreter;
+		cfg.sandboxSettings.runtime = SandboxSettings::Python;
+		QVERIFY(write(cfg.workingDirectory + "child.py",
+		              "import subprocess,sys\n"
+		              "try:\n"
+		              "    child = subprocess.Popen([sys.executable, '-c', 'pass'])\n"
+		              "except OSError:\n"
+		              "    print('denied')\n"
+		              "else:\n"
+		              "    assert child.wait(timeout=5) == 0\n"
+		              "    print('allowed')\n"));
+		cfg.sandboxSettings.enabled = false;
+
+		const auto ordinary = run(cfg);
+		QVERIFY2(ordinary.result == CorrectAnswer, qPrintable(ordinary.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("allowed"));
+		cfg.sandboxSettings.enabled = true;
+
+		const auto restricted = run(cfg);
+		QVERIFY2(restricted.result == CorrectAnswer, qPrintable(restricted.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("denied"));
+	}
+
 	void pythonVenv() {
 		if (python.isEmpty())
 			QSKIP("Python not installed");
@@ -598,10 +951,20 @@ class WindowsSandboxTests : public QObject {
 		cfg.sandboxSettings.runtime = SandboxSettings::Python;
 		QVERIFY(write(cfg.workingDirectory + "answer.py",
 		              "import sys\nassert sys.prefix != sys.base_prefix\nprint(42)\n"));
-		const auto result = run(cfg);
-		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
+		cfg.sandboxSettings.enabled = false;
+
+		const auto ordinary = run(cfg);
+		QVERIFY2(ordinary.result == CorrectAnswer, qPrintable(ordinary.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("42"));
+		cfg.sandboxSettings.enabled = true;
+
+		const auto restricted = run(cfg);
+		QCOMPARE(restricted.result, RunTimeError);
+		QVERIFY2(restricted.message.contains("Unable to create process", Qt::CaseInsensitive),
+		         qPrintable(restricted.message));
+		QVERIFY(read(cfg.workingDirectory + "_tmpout").isEmpty());
 	}
+
 	void javaRuntime() {
 		auto session = WindowsSandbox::createSession();
 		if (java.isEmpty() || javac.isEmpty())
@@ -618,13 +981,46 @@ class WindowsSandboxTests : public QObject {
 		compile.start(javac, {cfg.workingDirectory + "Main.java"});
 		QVERIFY(compile.waitForFinished(20000));
 		QCOMPARE(compile.exitCode(), 0);
+
 		const auto first = run(cfg);
 		QVERIFY2(first.result == CorrectAnswer, qPrintable(first.message));
 		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("42"));
+
 		const auto second = run(cfg);
 		QVERIFY2(second.result == CorrectAnswer, qPrintable(second.message));
 		QCOMPARE(second.runtimeAclUpdates, 0);
 		qInfo() << "Java preparation cold/warm ms:" << first.preparationTime << second.preparationTime;
+	}
+
+	void javaChildDenied() {
+		if (java.isEmpty() || javac.isEmpty())
+			QSKIP("JDK not installed");
+		auto cfg = config("-Xmx64m -XX:-UsePerfData Main");
+		cfg.executableFile = cfg.runtimeExecutable = java;
+		cfg.sandboxSettings.runtime = SandboxSettings::Java;
+		cfg.memoryLimit = 512;
+		QVERIFY(
+		    write(cfg.workingDirectory + "Main.java",
+		          "import java.io.*; class Main { public static void main(String[] args) throws Exception { "
+		          "Process child; try { child = new ProcessBuilder("
+		          "new File(\"helper.exe\").getAbsolutePath(), \"burn\", \"100\").start(); } "
+		          "catch (IOException e) { System.out.println(\"denied\"); return; } "
+		          "if (child.waitFor() != 0) throw new AssertionError(\"Child failed\"); "
+		          "System.out.println(\"allowed\"); }}"));
+		QProcess compile;
+		compile.start(javac, {cfg.workingDirectory + "Main.java"});
+		QVERIFY(compile.waitForFinished(20000));
+		QCOMPARE(compile.exitCode(), 0);
+		cfg.sandboxSettings.enabled = false;
+
+		const auto ordinary = run(cfg);
+		QVERIFY2(ordinary.result == CorrectAnswer, qPrintable(ordinary.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("allowed"));
+		cfg.sandboxSettings.enabled = true;
+
+		const auto restricted = run(cfg);
+		QVERIFY2(restricted.result == CorrectAnswer, qPrintable(restricted.message));
+		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("denied"));
 	}
 };
 

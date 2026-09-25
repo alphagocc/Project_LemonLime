@@ -2007,16 +2007,8 @@ Depends: </source>
 %2</translation>
     </message>
     <message>
-        <source>Preparing Windows sandbox...</source>
-        <translation>Preparing Windows sandbox...</translation>
-    </message>
-    <message>
         <source>Python runtime discovery produced excessive output.</source>
         <translation>Python runtime discovery produced excessive output.</translation>
-    </message>
-    <message>
-        <source>Running in Windows sandbox...</source>
-        <translation>Running in Windows sandbox...</translation>
     </message>
     <message>
         <source>Sandbox files must not be reparse points or hard links: %1</source>

@@ -13,7 +13,6 @@
 #include <QString>
 #include <QtGlobal>
 #include <atomic>
-#include <functional>
 #include <memory>
 
 class WindowsSandboxSession;
@@ -39,7 +38,6 @@ struct ProcessRunnerConfig {
 	QString runtimeExecutable;
 	QProcessEnvironment runtimeEnvironment;
 	std::shared_ptr<WindowsSandboxSession> sandboxSession;
-	std::function<void(const QString &)> preparationProgress;
 };
 
 struct ProcessRunnerResult {

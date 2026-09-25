@@ -38,9 +38,7 @@ ProcessRunnerResult WinProcessRunner::run() {
 
 	std::unique_ptr<WindowsSandbox> sandbox;
 	if (config.sandboxSettings.enabled) {
-		if (stopFlag)
-			return res;
-		sandbox = std::make_unique<WindowsSandbox>(config, stopFlag);
+		sandbox = std::make_unique<WindowsSandbox>(config);
 		QElapsedTimer preparation;
 		preparation.start();
 		QString error;
@@ -49,15 +47,11 @@ ProcessRunnerResult WinProcessRunner::run() {
 		res.runtimeAclUpdates = sandbox->aclUpdates();
 		res.runtimeCacheHit = sandbox->cacheHit();
 		if (! prepared) {
-			if (stopFlag)
-				return res;
 			res.result = CannotStartProgram;
 			res.message = error;
 			WARN(error);
 			return res;
 		}
-		if (config.preparationProgress)
-			config.preparationProgress(QObject::tr("Running in Windows sandbox..."));
 	}
 
 	SetErrorMode(SEM_NOGPFAULTERRORBOX);
@@ -112,25 +106,23 @@ ProcessRunnerResult WinProcessRunner::run() {
 	    environment.toStringList().join(QChar('\0')) + QChar('\0') + QChar('\0') + QChar('\0') + QChar('\0');
 
 	QString commandLine = QString(R"("%1" %2)").arg(config.executableFile).arg(config.arguments);
-	if (! CreateProcessW(nullptr, (WCHAR *)(commandLine).utf16(), nullptr, &sa, TRUE,
+	if (! CreateProcessW(nullptr, reinterpret_cast<WCHAR *>(commandLine.data()), nullptr, &sa, TRUE,
 	                     HIGH_PRIORITY_CLASS | EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS |
 	                         CREATE_UNICODE_ENVIRONMENT,
 	                     (LPVOID)(environmentValues.utf16()),
 	                     (const WCHAR *)(config.workingDirectory.utf16()), (STARTUPINFO *)(&siex), &pi)) {
+		const DWORD code = GetLastError();
 		res.score = 0;
 		res.result = CannotStartProgram;
 		res.message = "Failed to create process";
 		WARN(config.executableFile, "Failed to be started");
-		WARN("Last Error code:", GetLastError());
+		WARN("Last Error code:", code);
 		return res;
 	}
 
 	auto closeProcessHandle = qScopeGuard([&] {
-		if (sandbox) {
-			QString error;
-			sandbox->stopProcesses(error);
+		if (sandbox)
 			WaitForSingleObject(pi.hProcess, 5000);
-		}
 		CloseHandle(pi.hProcess);
 		CloseHandle(pi.hThread);
 	});
@@ -193,11 +185,6 @@ ProcessRunnerResult WinProcessRunner::run() {
 		res.score = 0;
 		res.result = TimeLimitExceeded;
 		res.timeUsed = -1;
-		return res;
-	}
-
-	if (sandbox && ! sandbox->stopProcesses(res.message)) {
-		res.result = CannotStartProgram;
 		return res;
 	}
 
