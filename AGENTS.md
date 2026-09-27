@@ -5,7 +5,7 @@
 Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量级评测系统，基于 Lemon + LemonPlus 开发。支持 Linux、Windows、macOS 三平台。
 
 - **Qt 版本**: Qt 6.8 或更高（可通过 `-DLEMON_QT_MAJOR_VERSION=<6|7>` 指定主版本）
-- **Qt 模块**: Core, Gui, Widgets（核心），Svg（图标插件），LinguistTools（翻译），AxContainer（仅 Windows XLS 导出）
+- **Qt 模块**: Core, Gui, Widgets（核心），Network（SingleApplication），Svg（图标插件），LinguistTools（翻译），Test（测试），DBus（仅 Linux 休眠控制），AxContainer（仅 Windows XLS 导出）
 - **C++ 标准**: C++17（`CMAKE_CXX_STANDARD 17`，无扩展）
 - **第三方依赖**: SingleApplication（单实例保护），spdlog（日志系统），均作为 git submodule 在 `3rdparty/` 下
 - **许可证**: GPL-3.0-or-later
@@ -15,7 +15,7 @@ Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量�
 ### 依赖
 
 - CMake ≥ 3.16
-- Qt 6.8+（需要 Core, Gui, Widgets, Svg, LinguistTools 模块）
+- Qt 6.8+（需要 Core, Gui, Widgets, Network, Svg, LinguistTools, Test 模块；Linux 另需 DBus）
 - C++17 兼容的编译器（MSVC / GCC / Clang）
 - Ninja（推荐）或 Make
 
@@ -128,6 +128,8 @@ Contest (QObject)
 4. `JudgingThread` 继承 `QThread`，负责运行程序并对比输出
 5. 结果通过信号链逐级回传至 UI
 
+常规设置提供默认启用的“评测时阻止系统休眠”开关，通过 QSettings 的 `GeneralSettings/PreventSleepWhileJudging` 保存。`JudgingController` 在首次分派任务前创建 `SleepInhibitor`，最后一个运行任务退出后释放；取消评测时同样等待运行任务结束。Windows 使用系统电源请求，macOS 使用 IOKit 的 `PreventUserIdleSystemSleep` assertion，Linux 使用系统 D-Bus 的 `org.freedesktop.login1.Manager.Inhibit`。申请仅阻止系统休眠，屏幕仍按系统设置关闭；申请失败记录日志并继续评测。Linux 构建链接 Qt DBus，macOS 链接 IOKit 与 CoreFoundation。
+
 ### Unix Watcher
 
 在 Linux/macOS 平台，会编译一个单独的 `watcher_unix` 可执行文件（包含 `watcher_unix.cpp` + 平台相关的 `watcher_linux.cpp` 或 `watcher_macos.mm`），用于监控被评测程序的资源使用（时间/内存），嵌入 `watcher.qrc` 资源到主程序。
@@ -150,7 +152,13 @@ Windows 资源包装采用 `LocalMemory<Pointer>`，模板参数使用 Windows �
 
 高级编译器设置提供默认未勾选的“实验性 Windows 沙箱”开关，启用后可以选择自动、本机程序、Java、Python 策略，额外只读目录和准备时间预算。配置通过 `Compiler` 的 JSON 字段 `windowsSandbox` 及 QSettings 的 `WindowsSandbox` 字段保存。
 
+`TaskJudger` 在复制测试文件与创建评测线程前检查测试点工作目录的创建结果。创建失败时记录 `FileError` 与零分，报告目录错误信息，沿用原有子任务依赖和后续独立子任务评测规则。普通模式与沙箱模式共用此检查。
+
 ## Qt Conventions
+
+### 应用外观
+
+外观设置提供“跟随系统”“浅色”“深色”三种模式，默认跟随系统。`Settings` 通过 QSettings 的 `VisualSettings/ColorScheme` 保存 `Qt::ColorScheme`，使用 `Unknown` 表示系统模式。应用启动和设置确认后调用 Qt 6.8 起提供的 `QStyleHints::setColorScheme()`，取消设置时保留原模式。`ResultViewer` 响应 `PaletteChange` 更新成绩背景颜色，保留当前选择与排序；SVG 图标继续按应用调色板绘制。
 
 ### 信号槽风格
 
@@ -369,6 +377,7 @@ enum ResultState {
 - **测试框架**: Qt Test，通过 CTest 执行
 - `tests/test1/` 包含比赛评测集成测试
 - `tests/windows-sandbox/` 包含 Windows 沙箱隔离、句柄、权限缓存、资源限制、取消和语言兼容测试，仅在 Windows 构建；C、C++、Python 和 Java 测试使用本机安装的工具，缺少对应工具时跳过该项
+- `tests/sleep-inhibitor/` 包含 Windows 电源请求的重复申请与嵌套释放测试，检查请求句柄的创建与回收
 - `unix/test/` 目录包含 watcher 相关的测试 CMakeLists 和测试程序
 
 ## Important Notes
