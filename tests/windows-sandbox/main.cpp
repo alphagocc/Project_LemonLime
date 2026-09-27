@@ -443,35 +443,18 @@ class WindowsSandboxTests : public QObject {
 		QVERIFY(QDir(cfg.workingDirectory).removeRecursively());
 	}
 
-	void namedInputIsReadOnly() {
-		auto cfg = config("runtime files/input.txt");
-		cfg.standardInputCheck = false;
-		cfg.inputFileName = "files/input.txt";
-		QVERIFY(QDir(cfg.workingDirectory).mkdir("files"));
-		QVERIFY(QFile::copy(cfg.inputFile, cfg.workingDirectory + cfg.inputFileName));
-		const auto before = permissions(cfg.workingDirectory + cfg.inputFileName);
-
-		const auto result = run(cfg);
-		QVERIFY2(result.result == CorrectAnswer, qPrintable(result.message));
-		QCOMPARE(read(cfg.workingDirectory + "_tmpout").trimmed(), QByteArray("readonly"));
-		QCOMPARE(read(cfg.workingDirectory + cfg.inputFileName), read(cfg.inputFile));
-		QCOMPARE(permissions(cfg.workingDirectory + cfg.inputFileName), before);
-	}
-
-	void inputRestorationPreservesRuntimeGrants() {
+	void workFileCleanupPreservesRuntimeGrants() {
 		auto session = WindowsSandbox::createSession();
 		auto first = config("sum");
 		first.sandboxSession = session;
-		first.standardInputCheck = false;
-		first.inputFileName = "input.txt";
-		const auto input = first.workingDirectory + first.inputFileName;
-		QVERIFY(QFile::copy(first.inputFile, input));
-		const auto before = permissions(input);
+		const auto resource = first.workingDirectory + "resource.txt";
+		QVERIFY(write(resource, "runtime data"));
+		const auto before = permissions(resource);
 		auto one = std::make_unique<WindowsSandbox>(first);
 		QString error;
 		QVERIFY2(one->prepare(error), qPrintable(error));
 
-		auto second = config("runtime " + quoteArgument(input));
+		auto second = config("runtime " + quoteArgument(resource));
 		second.sandboxSession = session;
 		second.sandboxSettings.readOnlyDirectories = {first.workingDirectory};
 		auto two = std::make_unique<WindowsSandbox>(second);
@@ -487,7 +470,7 @@ class WindowsSandboxTests : public QObject {
 		first.sandboxSession.reset();
 		second.sandboxSession.reset();
 		session.reset();
-		QCOMPARE(permissions(input), before);
+		QCOMPARE(permissions(resource), before);
 	}
 
 	void runtimeJunction_data() {
