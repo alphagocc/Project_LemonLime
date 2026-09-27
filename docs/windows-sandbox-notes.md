@@ -34,17 +34,17 @@ Windows AppContainer 沙箱默认关闭。高级编译器设置中的“实验�
 
 目录名使用 `QDir::canonicalPath()` 规范化，运行环境中的目录连接交给 Windows 文件操作跟随，支持 Scoop 的 `current` 及父目录中的连接。项目代码中的手工 Windows 句柄解析、`std::filesystem` 调用、连接追踪和循环检测均移除。无效目标由文件打开操作报告错误。Python 首次通过选定的可信解释器发现完整安装和虚拟环境；发现结果用于运行环境授权，执行时保留用户配置的启动程序。运行目录之外的启动器文件单独获得读取与执行权限。发现程序使用普通 QProcess，准备超时返回时由其析构函数终止探测进程并等待退出。该可信探测沿用宿主执行行为。需要启动子进程的 Python 启动器和 Windows venv 会在执行提交脚本时失败，应显式配置基础 Python 等单进程运行入口；程序本身不会自动替换入口。提交脚本在沙箱内执行，临时目录和用户目录环境变量保留用户显式配置，`LOCALAPPDATA` 缺省时设为当前测试点工作目录，满足本机验证中 Windows 创建 AppContainer 进程的要求；输出编码、用户包加载和字节码缓存遵循解释器默认行为及用户显式配置。
 
-运行目录按配置准备权限，允许与比赛数据或工作目录重叠。工作文件在原 DACL 上追加本次 Package SID 权限，保留原有权限项和保护状态，重解析点与硬链接仍予以拒绝。工作文件准备与撤销共用权限互斥锁，准备时先处理子项再处理父目录。工作目录使用明确的元数据及 DACL 句柄权限，保留 Windows 的继承处理；运行环境目录继续使用 `MAXIMUM_ALLOWED`。具名输入追加只读权限并临时保护 DACL；原本允许继承的输入保存原安全描述符，在父目录临时授权撤销后，基于现行 DACL 恢复原继承标记和保护状态，保留其他活动任务后来追加的授权；其他工作文件按本次 SID 撤销新增权限。
+运行目录按配置准备权限，允许与比赛数据或工作目录重叠。工作文件在原 DACL 上追加本次 Package SID 权限，保留原有权限项和保护状态，重解析点与硬链接仍予以拒绝。工作文件准备与撤销共用权限互斥锁，准备时先处理子项再处理父目录。工作目录使用明确的元数据及 DACL 句柄权限，保留 Windows 的继承处理；运行环境目录继续使用 `MAXIMUM_ALLOWED`。具名输入使用工作目录中的独立副本，与其他工作文件统一授权。清理时从当前 DACL 中移除本次 SID 的允许项，保留其他活动任务追加的授权，省去输入文件权限快照和继承恢复。标准输入沿用原始文件的只读句柄。
 
 启用沙箱时，自动、本机程序、Java 和 Python 策略统一设置 Job 的 `ActiveProcessLimit = 1`，禁止提交程序创建子进程。`stopProcesses()` 及进程树轮询、终止接口移除，运行器沿用 `TerminateProcess()` 终止主进程并等待退出。Job 保留 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，在句柄关闭时终止仍在运行的进程。
 
 两种执行模式均返回主进程用户态时间和峰值工作集；内存限制检查主进程 `PrivateUsage` 与 `PeakWorkingSetSize` 的较大值。Job 仅用于单进程限制及句柄关闭时的进程终止，时间和内存统计仍使用主进程句柄，沿用原有内存限制。运行监控保留 10 毫秒等待间隔，输出结果判断保留在评测层。
 
-权限准备仅检查时间预算，停止标记由进程运行器处理。准备进度回调、信号转发及指向当前运行线程的取消界面连接移除；整体评测的取消入口按原有定义停止后续测试点。超时或失败时撤销本阶段新增的授权；成功的记录在评测会话内存中复用，评测结束后释放。Java 和 Python 的环境发现分别由 `discoverJava()` 与 `discoverPython()` 实现，`discover()` 只负责策略分派。
+权限准备仅检查时间预算，停止标记由进程运行器处理。准备进度回调、信号转发及指向当前运行线程的取消界面连接移除；整体评测的取消入口按原有定义停止后续测试点。超时或失败时撤销本阶段新增的授权；成功的记录在评测会话内存中复用，评测结束后释放。Java 和 Python 的环境发现分别由 `discoverJava()` 与 `discoverPython()` 实现，`discover()` 分派策略，将目录规范化后调用 `removeDuplicates()` 精确去重。目录名、程序文件名、缓存键和能力标识保留大小写差异。
 
 `hasGrant()` 按 ACE 顺序处理剩余请求权限，允许项提供全部所需权限时结束检查。`ALL APPLICATION PACKAGES` SID 在会话内构造一次。工作文件授权省去当前用户 SID 查询、SDDL 模板及整份私有 DACL 构造，逐项读取并合并原权限。能力 SID 数组由局部 RAII 对象释放，选中的 SID 转交独占所有权对象管理，进程属性数组仅引用这些 SID。`quoteArgument()` 属于测试辅助函数，`errorText()` 属于沙箱实现的局部函数。共享头文件 `windowsprocessutils.h` 提供 `Handle`、`LocalDeleter`、`LocalMemory` 和 `wide()`；生产代码和测试中的独立 `LocalFree()` 内存统一使用 `LocalMemory`，SID 数组由 `SidArray` 逐项释放，Package SID 使用 `FreeSid()`。
 
-参照 Privexec 的资源类接口，`LocalMemory<Pointer>` 使用 Windows 指针类型作为模板参数，例如 `LocalMemory<PSECURITY_DESCRIPTOR>` 和 `LocalMemory<PACL>`，使声明保留对象的类型信息。通过 `put()` 接收 Windows API 输出，通过 `get()` 访问资源，通过 `release()` 转移所有权，调用处每项资源仅保留一个所有者。`Handle` 提供对应的输出参数接口；`SidArray` 封装数组和计数。`prepareRuntimePermissions()` 管理运行环境授权、互斥锁和失败回滚，`preparePrivateFiles()` 管理 AppContainer 身份与私有文件，`prepare()` 负责按顺序调用并设置执行环境。
+参照 Privexec 的资源类接口，`LocalMemory<Pointer>` 使用 Windows 指针类型作为模板参数，例如 `LocalMemory<PSECURITY_DESCRIPTOR>` 和 `LocalMemory<PACL>`，使声明保留对象的类型信息。通过 `put()` 接收 Windows API 输出，通过 `get()` 访问资源，通过 `release()` 转移所有权，调用处每项资源仅保留一个所有者。`Handle` 提供对应的输出参数接口；`SidArray` 封装数组和计数。`prepareRuntimePermissions()` 管理运行环境授权、互斥锁和失败回滚，`preparePrivateFiles()` 仅处理工作文件授权；`prepare()` 先创建 AppContainer 身份，再发现运行环境、准备授权和工作文件，最后设置执行环境。
 
 ## 验证
 
@@ -84,3 +84,11 @@ Windows AppContainer 沙箱默认关闭。高级编译器设置中的“实验�
 
 
 后续精简：临时工作目录的完整 DACL 快照和还原属于多余的恢复流程，现交由已有的临时目录生命周期完成文件清理。保留运行环境原有权限、临时授权撤销、并行会话复用，以及 Java 和 Python 独立发现函数。授权与撤销复用同一个文件句柄打开函数。该源文件从 734 行减少至 670 行；完整构建、两个 CTest 测试集及 43 项沙箱测试通过。
+
+## 2026-09-28 待处理事项
+
+### 提前检查测试点工作目录的创建结果
+
+`src/core/taskjudger.cpp:453` 调用 `QDir::mkdir()` 创建测试点工作目录，当前未检查返回值。创建失败后，代码仍会继续复制文件并启动评测线程。`preparePrivateFiles()` 以调用方预先创建目录为前提，沿用 `config.workingDirectory`。
+
+后续应在创建目录后立即检查结果，失败时报告目录创建错误并停止后续文件复制与线程启动。本次仅记录，修复另行处理。
