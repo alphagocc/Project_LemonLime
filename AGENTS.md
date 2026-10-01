@@ -150,7 +150,7 @@ Windows 资源包装采用 `LocalMemory<Pointer>`，模板参数使用 Windows �
 
 两种执行模式均保留原有计量：返回主进程用户态时间与峰值工作集，内存限制检查主进程 `PrivateUsage` 与 `PeakWorkingSetSize` 的较大值。Job 不参与时间和内存计量，也不设置总内存配额。运行监控保留 10 毫秒等待间隔，输出结果判断保留在评测层。关闭标准流重定向时保留空句柄，继承白名单仅包含实际打开的标准流。AppContainer 和 Job 在创建进程时通过属性配置，沿用原有启动标志。沙箱使用当前测试点工作目录，临时目录和用户目录环境变量保留用户显式配置，省去额外辅助目录及对应的环境变量覆盖。`LOCALAPPDATA` 缺省时设为当前测试点工作目录，以满足本机验证中 Windows 创建 AppContainer 进程的要求。Python 输出编码、用户包加载和字节码缓存遵循解释器默认行为及用户显式配置。取消返回值、运行错误信息和启动优先级沿用原有定义。沙箱功能应保持上述评测行为，其他行为调整须取得用户明确授权。编译阶段和检查器当前仍使用宿主权限。
 
-高级编译器设置提供默认未勾选的“实验性 Windows 沙箱”开关，启用后可以选择自动、本机程序、Java、Python 策略，额外只读目录和准备时间预算。配置通过 `Compiler` 的 JSON 字段 `windowsSandbox` 及 QSettings 的 `WindowsSandbox` 字段保存。
+高级编译器设置提供默认未勾选的“实验性 Windows 沙箱”开关，启用后可以选择自动、本机程序、Java、Python 策略，额外只读目录和准备时间预算。配置通过 `Compiler` 的 JSON 字段 `windowsSandbox` 及 QSettings 的 `WindowsSandbox` 分组保存。QSettings 分组包含 `Enabled`、`Runtime`、`ReadOnlyDirectories` 和 `PreparationTimeLimit` 四个字段，按程序保存的类型和值读取，字段缺失时采用沙箱配置的默认值。
 
 `TaskJudger` 在复制测试文件与创建评测线程前检查测试点工作目录的创建结果。创建失败时记录 `FileError` 与零分，报告目录错误信息，沿用原有子任务依赖和后续独立子任务评测规则。普通模式与沙箱模式共用此检查。
 
