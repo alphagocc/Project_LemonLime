@@ -5,7 +5,7 @@
 Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量级评测系统，基于 Lemon + LemonPlus 开发。支持 Linux、Windows、macOS 三平台。
 
 - **Qt 版本**: Qt 6.8 或更高（可通过 `-DLEMON_QT_MAJOR_VERSION=<6|7>` 指定主版本）
-- **Qt 模块**: Core, Gui, Widgets（核心），Network（SingleApplication），Svg（图标插件），LinguistTools（翻译），Test（测试），DBus（仅 Linux 休眠控制），AxContainer（仅 Windows XLS 导出）
+- **Qt 模块**: Core, Gui, Widgets（应用与兼容依赖），Qml, Quick, QuickControls2（界面），Network（SingleApplication），Svg（图标插件），LinguistTools（翻译），Test（测试），DBus（仅 Linux 休眠控制），AxContainer（仅 Windows XLS 导出）
 - **C++ 标准**: C++17（`CMAKE_CXX_STANDARD 17`，无扩展）
 - **第三方依赖**: SingleApplication（单实例保护），spdlog（日志系统），均作为 git submodule 在 `3rdparty/` 下
 - **许可证**: GPL-3.0-or-later
@@ -15,7 +15,7 @@ Project LemonLime 是一个面向 OI（信息学奥林匹克）竞赛的轻量�
 ### 依赖
 
 - CMake ≥ 3.16
-- Qt 6.8+（需要 Core, Gui, Widgets, Network, Svg, LinguistTools, Test 模块；Linux 另需 DBus）
+- Qt 6.8+（需要 Core, Gui, Widgets, Qml, Quick, QuickControls2, Network, Svg, LinguistTools, Test 模块；Linux 另需 DBus）
 - C++17 兼容的编译器（MSVC / GCC / Clang）
 - Ninja（推荐）或 Make
 
@@ -61,12 +61,10 @@ Project_LemonLime/
 ├── src/
 │   ├── base/           # 基础设施层（静态库 lemon-base）
 │   ├── core/           # 核心业务逻辑（静态库 lemon-core，依赖 lemon-base）
-│   ├── component/      # 组件（exportutil 导出工具）
-│   ├── forms/          # Qt Designer .ui 文件（26 个）
+│   ├── qml/            # Qt Quick 界面、QObject 控制器、成绩表模型
 │   ├── main.cpp        # 入口
 │   ├── pch.h           # 预编译头（QtCore + QtGui）
-│   ├── lemon.h/.cpp    # 主窗口 LemonLime : QMainWindow
-│   └── *.h/*.cpp       # UI 层各对话框和控件
+│   └── plugins/        # SVG 图标插件
 ├── 3rdparty/
 │   ├── SingleApplication/  # 单实例应用
 │   └── spdlog/             # 日志库
@@ -90,9 +88,9 @@ Project_LemonLime/
 
 ```
 ┌─────────────────────────────┐
-│       UI Layer (exe)        │  主窗口、对话框、自定义控件
-│  LemonLime, JudgingDialog,  │  直接链接 lemon-core, lemon-base
-│  ResultViewer, SummaryTree  │
+│       UI Layer (exe)        │  Qt Quick Controls、QML 页面
+│  AppController, ResultModel │  链接 lemon-core、lemon-base
+│  TaskController, Settings   │  QObject 属性与调用接口
 ├─────────────────────────────┤
 │     Core Layer (lemon-core) │  评测逻辑、比赛/选手/题目管理
 │  Contest, Task, Contestant, │
@@ -114,7 +112,7 @@ Contest (QObject)
 │   └── Task (QObject)
 │       ├── QList<TestCase*>
 │       │   └── TestCase (非 QObject)
-│       └── TaskType: Traditional | AnswersOnly | Interaction | Communication
+│       └── TaskType: Traditional | AnswersOnly | Interaction | Communication | CommunicationExec
 └── QMap<QString, Contestant*>
     └── Contestant (QObject)
         └── 存储每题的编译状态、评测结果、得分、时间、内存
@@ -158,17 +156,15 @@ Windows 资源包装采用 `LocalMemory<Pointer>`，模板参数使用 Windows �
 
 ### 应用外观
 
-外观设置提供“跟随系统”“浅色”“深色”三种模式，默认跟随系统。`Settings` 通过 QSettings 的 `VisualSettings/ColorScheme` 保存 `Qt::ColorScheme`，使用 `Unknown` 表示系统模式。应用启动和设置确认后调用 Qt 6.8 起提供的 `QStyleHints::setColorScheme()`，取消设置时保留原模式。`ResultViewer` 响应 `PaletteChange` 更新成绩背景颜色，保留当前选择与排序；SVG 图标继续按应用调色板绘制。
+外观设置提供“跟随系统”“浅色”“深色”三种模式，默认跟随系统。`Settings` 通过 QSettings 的 `VisualSettings/ColorScheme` 保存 `Qt::ColorScheme`，使用 `Unknown` 表示系统模式。应用启动和设置确认后调用 Qt 6.8 起提供的 `QStyleHints::setColorScheme()`，取消设置时保留原模式。Windows 下选择 Qt Quick Controls 的 `FluentWinUI3` 样式，控件背景和文字统一响应应用的深浅配色；其他平台使用平台默认样式。共享控件保留原版紧凑尺寸，并在 Windows 下调整内部留白。`ResultModel` 响应调色板变化更新成绩颜色，保留当前选择与排序；评测期间成绩表读取缓存数据，评测结束后刷新。
 
 ### 信号槽风格
 
 **100% 使用新式（C++11 函数指针）连接**，项目中无任何 `SIGNAL()`/`SLOT()` 宏的使用。
 
 ```cpp
-// 典型连接方式（摘自 taskeditwidget.cpp）
-connect(ui->problemTitle, &QLineEdit::textChanged, this, &TaskEditWidget::problemTitleChanged);
-connect(ui->comparisonMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
-        &TaskEditWidget::comparisonModeChanged);
+connect(&taskController, &TaskController::contestEdited, &controller, &AppController::edited);
+connect(&controller, &AppController::contentChanged, &contestTools, &ContestTools::refresh);
 ```
 
 对于有重载的信号，使用 `qOverload<>()` 消歧。
@@ -207,7 +203,7 @@ delete taskJudger;
 
 SVG 图标在 `assets/pics/` 中维护一份图形，资源别名使用 `.llsvg` 后缀，由静态 `LemonSvgIconPlugin` 创建自定义 `QIconEngine`。插件使用 XML 解析替换 `id="current-color-scheme"` 的 SVG 样式块；`ColorScheme-Text` 使用应用调色板，`ColorScheme-NegativeText` 使用集中管理的浅色与深色提示颜色，禁用和选中状态采用对应的调色板颜色。插件缓存配色后的 SVG，并按源码摘要、调色板、尺寸、状态和设备像素比缓存图像。代码位于 `src/plugins/lemonsvgiconplugin.cpp`，使用 Qt Svg 模块；`qt_add_plugin` 在链接时自动注册插件。
 
-新增图标须在专用样式块中声明上述颜色角色，图形使用 `currentColor`，并在 `resource.qrc` 中注册 `.llsvg` 别名，表单使用同一别名。专用样式块仅存放主题颜色声明，其他样式置于该样式块之外。普通 `.svg` 仍由 Qt 原生插件处理。图标绘制采用应用级调色板。
+新增 QIcon 图标须在专用样式块中声明上述颜色角色，图形使用 `currentColor`，并在 `resource.qrc` 中注册 `.llsvg` 别名。专用样式块仅存放主题颜色声明，其他样式置于该样式块之外。普通 `.svg` 仍由 Qt 原生插件处理。图标绘制采用应用级调色板。QML 的 `Image` 使用普通 SVG 或位图资源；`.llsvg` 自定义别名属于 QIconEngine 接口。
 
 图标插件参考 KIconThemes 的颜色角色和 XML 样式替换设计，采用独立实现，许可证为 `GPL-3.0-or-later`。参考版本、文件和上游许可证记录于 `src/plugins/README.md`；此次集成未引入 KDE 源码或库依赖。
 
@@ -268,15 +264,9 @@ class JudgingController;
 
 项目使用 `Lemon` 作为顶级命名空间，子空间包括 `Lemon::base`、`Lemon::base::config`、`Lemon::detail`、`Lemon::common`。旧代码中的核心类（`Contest`, `Task` 等）不在命名空间内。
 
-### UI 命名空间
+### QML 控制器
 
-Qt Designer 生成的类放在 `Ui` 命名空间中：
-
-```cpp
-namespace Ui {
-    class LemonLime;
-}
-```
+`AppController` 管理比赛文件、最近比赛、评测队列和结果详情；`ResultModel` 提供 `QAbstractTableModel` 成绩表；`TaskController` 管理题目与子任务编辑；`SettingsController` 使用独立副本管理设置应用和取消；`ContestTools` 处理统计、导出和源程序整理。页面通过属性和 `Q_INVOKABLE` 接口调用控制器，界面消息使用信号传递。QML 中采用 `qsTr()`，C++ 控制器采用 `tr()`。
 
 ### const 正确性
 
@@ -342,16 +332,21 @@ initLogger();                          // 初始化 spdlog
 Lemon::LemonBaseApplication app(...);  // 继承 SingleApplication（单实例）
 app.Initialize();                      // 解析命令行、初始化翻译
 if (app.sendMessage("")) { ... }       // 已有实例则激活已有窗口
-LemonLime w;                           // 创建主窗口
-screen.show(); ... screen.finish(&w);  // 启动画面
-w.show(); w.welcome();                 // 显示欢迎对话框
+Settings settings; settings.loadSettings(); // 加载界面与评测配置
+QQmlApplicationEngine engine;              // 设置控制器上下文属性
+engine.loadFromModule("LemonLime", "Main"); // 加载 ApplicationWindow
 ```
 
 ### UI 结构
 
-- `.ui` 文件定义在 `src/forms/` 目录（26 个文件）
-- CMake 自动处理 `AUTOUIC`（搜索路径设为 `src/forms`）、`AUTOMOC`、`AUTORCC`
-- UI 类以 `Ui::ClassName` 命名空间持有指针
+- QML 组件位于 `src/qml/`。`Main.qml` 保留原顶部菜单、左侧 Tasks、Contestants、Statistics 三个竖排页签，以及选手页底部操作按钮。
+- `SettingsDialog`、`ContestDialog`、编译器与测试点编辑窗口均使用独立原生窗口，原表单布局和交互层级见迁移记录。
+- `controls/` 使用标准控件名称，通过 `Controls.Button`、`Controls.TextField` 等形式引用平台控件。`StyleMetrics` 缓存未显示的 Qt 测量控件尺寸；`StyleItem` 提供页签、分组边框、表头、树分支及紧凑数字输入框绘制。Windows 数字输入框采用单列竖排箭头，命中区域与绘制共用几何计算；步进和范围控制由 QML SpinBox 提供。可见界面和交互由 QML 管理。
+- 共享 `ToolButton` 使用平台 `Button` 的常驻背景与边框，并保留紧凑尺寸，对应原版 `QToolButton` 的 `autoRaise=false` 行为。
+- `TextDocumentItem` 使用 QTextDocument 绘制成绩详情、统计和日志。`lemon-icons` image provider 复用 QIconEngine，指定图像设备像素比以避免重复高 DPI 放大，并通过调色板版本刷新图标。
+- CMake 的 `qt_add_qml_module` 将 `LemonLime` 模块嵌入程序。QML 文件变化触发配置更新，翻译更新目标包含 QML 文本。
+- 比赛每 30 秒自动保存；评测期间暂停保存和修改，结束后保存结果。`QSaveFile` 完成原子替换，保存失败时保持当前比赛。
+- 完整界面变化与验证记录见 `docs/qml-ui-migration.md`。运行时须部署 Qt Quick Controls、Layouts、Dialogs、QtCore 等 QML 模块，Windows 使用 `windeployqt --qmldir src/qml`。
 
 ### 评测结果状态机
 
@@ -375,6 +370,10 @@ enum ResultState {
 ## Testing
 
 - **测试框架**: Qt Test，通过 CTest 执行
+- `tests/qml-ui/` 包含比赛管理、数据桥接、QML 窗口加载与页面验证；测试使用独立临时配置目录。Windows 另外检查深浅色启动、设置确认切换、跟随系统、取消操作、真实像素对比度、标题栏配色、字体继承及数字输入框点击；全部窗口生成深浅两套截图。
+- Windows 界面测试使用原生平台和 D3D11，测试窗口透明、鼠标穿透且禁止激活。`tests/ui-reference/` 为可选原版参照工具，通过 `LEMON_UI_REFERENCE_SOURCE_DIR` 指定只读原检出；截图附带控件逻辑几何信息。
+
+`Settings` 创建 QSettings 时显式传入 `QSettings::defaultFormat()` 和 `UserScope`。生产环境沿用默认 NativeFormat；界面测试设为 IniFormat，并在构造控制器前断言实际配置文件位于本用例临时目录中。禁止依赖固定组织名的简写构造函数进行测试隔离，该重载会忽略 defaultFormat。
 - `tests/test1/` 包含比赛评测集成测试
 - `tests/windows-sandbox/` 包含 Windows 沙箱隔离、句柄、权限缓存、资源限制、取消和语言兼容测试，仅在 Windows 构建；C、C++、Python 和 Java 测试使用本机安装的工具，缺少对应工具时跳过该项
 - `tests/sleep-inhibitor/` 包含 Windows 电源请求的重复申请与嵌套释放测试，检查请求句柄的创建与回收
