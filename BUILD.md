@@ -9,12 +9,14 @@
 | CMake | 推荐 3.20 或更高；项目最低要求为 3.16，还须满足所选 Qt 工具包的要求 |
 | C++ 编译器 | 支持 C++17，使用与 Qt 工具包匹配的 MSVC、GCC 或 Clang |
 | Qt | 6.8 或更高，当前 Windows 和 macOS CI 使用 6.9.3 |
-| Qt 模块 | Core、Gui、Widgets、Network、Svg、LinguistTools、Test |
+| Qt 模块 | Core、Gui、Widgets、Network、Svg、Qml、Quick、QuickControls2、LinguistTools、Test |
 | Linux 附加模块 | Qt DBus，用于评测期间向系统申请阻止休眠 |
 | 构建工具 | Ninja，或 CMake 支持的其他生成器 |
 | Git | 用于获取源代码、子模块及构建版本号 |
 
 Qt Network 由 SingleApplication 使用，Qt Test 是当前 CMake 测试目标的必需依赖。Windows 的 XLS 导出还需要 Qt ActiveQt 中的 AxContainer 模块，默认关闭。
+
+应用界面使用 Qt Quick Controls。Qt 工具包须包含 qtdeclarative 及 QtQuick、QtQuick.Controls、QtQuick.Layouts、QtQuick.Dialogs、QtCore 的 QML 模块。Windows 运行与部署还需要 `QtQuick.Controls.FluentWinUI3` 及其依赖模块，以提供随应用深浅配色切换的 Windows 11 控件。QML 源文件通过 `qt_add_qml_module` 编译并嵌入可执行文件。
 
 项目将 SingleApplication 和 spdlog 作为 Git 子模块构建。用户提交程序所需的 C、C++、Java 或 Python 工具应另外安装并在 LemonLime 中配置。
 
@@ -62,7 +64,7 @@ cmake --build build --parallel
 将示例 Qt 目录替换为本机安装位置。生成的程序为 `build/lemon.exe`。动态链接 Qt 时，使用同一工具包的 `windeployqt` 配置运行依赖：
 
 ```powershell
-& "C:/Qt/6.9.3/msvc2022_64/bin/windeployqt.exe" --release build/lemon.exe
+& "C:/Qt/6.9.3/msvc2022_64/bin/windeployqt.exe" --release --qmldir src/qml build/lemon.exe
 & ./build/lemon.exe
 ```
 
@@ -85,11 +87,14 @@ Qt 6 支持这一选项，运行 XLS 导出还需要本机安装 Microsoft Excel
 
 ```bash
 # Arch Linux
-sudo pacman -S --needed base-devel cmake ninja qt6-base qt6-tools qt6-svg
+sudo pacman -S --needed base-devel cmake ninja qt6-base qt6-tools qt6-svg qt6-declarative
 
 # Debian 或 Ubuntu
 sudo apt install build-essential cmake ninja-build pkg-config lsb-release \
-    qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev
+    qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev \
+    qt6-declarative-dev qml6-module-qtquick qml6-module-qtquick-controls \
+    qml6-module-qtquick-layouts qml6-module-qtquick-dialogs qml6-module-qtquick-window \
+    qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qtcore
 ```
 
 发行版仓库中的 Qt 必须满足 6.8 的最低版本。对于提供较早版本 Qt 的发行版，应安装符合要求的 Qt 工具包，并设置 `CMAKE_PREFIX_PATH`。Qt DBus 通常由 Qt base 开发包提供，自行构建 Qt 时也须包含该模块。

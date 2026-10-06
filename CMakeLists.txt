@@ -32,9 +32,8 @@ LEMONLOG(ENABLE_CCACHE)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC_SEARCH_PATHS ${CMAKE_SOURCE_DIR}/src/forms)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,7 +53,9 @@ if(NOT Qt_DIR AND DEFINED Qt${LEMON_QT_MAJOR_VERSION}_DIR)
     set(Qt_DIR ${Qt${LEMON_QT_MAJOR_VERSION}_DIR})
 endif()
 
-find_package(Qt${LEMON_QT_MAJOR_VERSION} ${LEMON_QT_MIN_VERSION} COMPONENTS Core Gui Widgets REQUIRED)
+find_package(Qt${LEMON_QT_MAJOR_VERSION} ${LEMON_QT_MIN_VERSION} COMPONENTS Core Gui Widgets Qml Quick QuickControls2 REQUIRED)
+qt_policy(SET QTP0001 NEW)
+qt_policy(SET QTP0004 NEW)
 
 set(LEMON_QT_LIBNAME Qt${LEMON_QT_MAJOR_VERSION})
 
@@ -238,6 +239,7 @@ add_custom_target(lupdate
     ${LEMON_CORE_SOURCES}
     ${LEMON_UI_SOURCES}
     ${LEMON_UI_FORMS}
+    ${LEMON_QML_FILES}
     ${SINGLEAPPLICATION_SOURCES} -ts ${TRANSLATIONS_TS} -locations none -noobsolete
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_target_properties(lupdate PROPERTIES EXCLUDE_FROM_ALL TRUE)
@@ -253,13 +255,10 @@ set(QRC_RESOURCES
     )
 
 set(LEMON_FULL_SOURCES
-    ${LEMON_BASE_SOURCES}
-    ${LEMON_CORE_SOURCES}
     ${LEMON_UI_SOURCES}
     assets/lemon.rc
     ${LEMON_UI_FORMS}
     ${LEMON_UI_RESOURCES}
-    ${SINGLEAPPLICATION_SOURCES}
     ${LEMON_EMBED_TRANSLATION_QRC}
     ${QRC_RESOURCES}
     ${QM_FILES}
@@ -285,7 +284,14 @@ else()
     add_dependencies(lemon watcher_unix)
 endif()
 
-target_include_directories(lemon PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(lemon PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/qml)
+
+qt_add_qml_module(lemon
+    URI LemonLime
+    VERSION 1.0
+    QML_FILES ${LEMON_QML_FILES}
+)
+target_link_libraries(lemon PRIVATE ${LEMON_QT_LIBNAME}::Qml ${LEMON_QT_LIBNAME}::Quick ${LEMON_QT_LIBNAME}::QuickControls2)
 
 if(WIN32 AND ENABLE_XLS_EXPORT)
     find_package(${LEMON_QT_LIBNAME} COMPONENTS AxContainer REQUIRED)

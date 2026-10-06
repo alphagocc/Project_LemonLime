@@ -7,17 +7,25 @@
  *
  */
 
-#include "lemon.h"
+#include "qml/appcontroller.h"
+#include "qml/contesttools.h"
+#include "qml/controlstyle.h"
+#include "qml/settingscontroller.h"
+#include "qml/taskcontroller.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 //
 #include "base/LemonBase.hpp"
 #include "base/LemonBaseApplication.hpp"
 #include "base/LemonLog.hpp"
+#include "base/LemonTranslator.hpp"
+#include "base/settings.h"
 #include "spdlog/sinks/daily_file_sink.h"
 //
 #include <QApplication>
-#include <QPixmap>
-#include <QSplashScreen>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickStyle>
+#include <QQuickWindow>
 #include <chrono>
 
 #define LEMON_MODULE_NAME "Main"
@@ -65,24 +73,55 @@ int main(int argc, char *argv[]) {
 	// fonts.setFamily("PingFangSC-Regular");
 #endif
 	Q_INIT_RESOURCE(resource);
-	QPixmap pixmap(":/logo/splash2.png");
-	QSplashScreen screen(pixmap.scaled(450, 191, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-	LemonLime w;
-	qint64 startTime = QDateTime::currentMSecsSinceEpoch();
-	int splashTime = w.getSplashTime();
-
-	if (splashTime > 0) {
-		screen.show();
-
-		do {
-			SingleApplication::processEvents();
-		} while (QDateTime::currentMSecsSinceEpoch() - startTime <= splashTime);
-
-		screen.finish(&w);
-	}
-
-	w.activateWindow();
-	w.show();
-	w.welcome();
+	app.setWindowIcon(QIcon(":/icon/icon.png"));
+#ifdef Q_OS_WIN
+	QQuickStyle::setStyle("FluentWinUI3");
+#endif
+	Settings settings;
+	settings.loadSettings();
+	AppController controller(&settings);
+	TaskController taskController(&settings);
+	SettingsController settingsController(&settings);
+	ContestTools contestTools;
+	QQmlApplicationEngine engine;
+	registerControlImages(&engine);
+	engine.setUiLanguage(settings.getUiLanguage());
+	engine.rootContext()->setContextProperty("appController", &controller);
+	engine.rootContext()->setContextProperty("taskController", &taskController);
+	engine.rootContext()->setContextProperty("settingsController", &settingsController);
+	engine.rootContext()->setContextProperty("contestTools", &contestTools);
+	QObject::connect(&controller, &AppController::contestChanged, &taskController, [&] {
+		taskController.setContest(controller.getContest());
+		contestTools.setContest(controller.getContest());
+	});
+	QObject::connect(&controller, &AppController::judgingChanged, &taskController, [&] {
+		taskController.setBusy(controller.judging());
+		contestTools.setBusy(controller.judging());
+	});
+	QObject::connect(&controller, &AppController::contentChanged, &contestTools, &ContestTools::refresh);
+	QObject::connect(&controller, &AppController::dataFilesChanged, &taskController,
+	                 &TaskController::refresh);
+	QObject::connect(&taskController, &TaskController::contestEdited, &controller, &AppController::edited);
+	QObject::connect(&contestTools, &ContestTools::filesChanged, &controller,
+	                 &AppController::refreshContestants);
+	QObject::connect(&settingsController, &SettingsController::settingsApplied, &controller, [&] {
+		LemonLimeTranslator->InstallTranslation(settings.getUiLanguage());
+		engine.setUiLanguage(settings.getUiLanguage());
+		controller.settingsApplied();
+		taskController.refresh();
+		engine.retranslate();
+	});
+	QObject::connect(&app, &SingleApplication::receivedMessage, &engine, [&](quint32, const QByteArray &) {
+		if (engine.rootObjects().isEmpty())
+			return;
+		if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) {
+			window->showNormal();
+			window->raise();
+			window->requestActivate();
+		}
+	});
+	engine.loadFromModule("LemonLime", "Main");
+	if (engine.rootObjects().isEmpty())
+		return 1;
 	return app.exec();
 }

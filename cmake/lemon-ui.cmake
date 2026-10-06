@@ -4,36 +4,26 @@
 
 set(LEMON_BASEDIR_UI ${CMAKE_SOURCE_DIR}/src)
 
-aux_source_directory(${LEMON_BASEDIR_UI} LEMON_UI_SOURCES)
+set(LEMON_UI_SOURCES
+    ${LEMON_BASEDIR_UI}/main.cpp
+    ${LEMON_BASEDIR_UI}/qml/appcontroller.cpp
+    ${LEMON_BASEDIR_UI}/qml/appcontroller.h
+    ${LEMON_BASEDIR_UI}/qml/resultmodel.cpp
+    ${LEMON_BASEDIR_UI}/qml/resultmodel.h
+    ${LEMON_BASEDIR_UI}/qml/taskcontroller.cpp
+    ${LEMON_BASEDIR_UI}/qml/taskcontroller.h
+    ${LEMON_BASEDIR_UI}/qml/settingscontroller.cpp
+    ${LEMON_BASEDIR_UI}/qml/settingscontroller.h
+    ${LEMON_BASEDIR_UI}/qml/contesttools.cpp
+    ${LEMON_BASEDIR_UI}/qml/contesttools.h
+    ${LEMON_BASEDIR_UI}/qml/controlstyle.cpp
+    ${LEMON_BASEDIR_UI}/qml/controlstyle.h
+    ${LEMON_BASEDIR_UI}/qml/resultdetails.cpp
+    ${LEMON_BASEDIR_UI}/qml/resultdetails.h
+)
 
-list(APPEND LEMON_UI_SOURCES ${LEMON_BASEDIR_UI}/component/exportutil/exportutil.cpp)
-list(APPEND LEMON_UI_SOURCES ${LEMON_BASEDIR_UI}/component/exportutil/exportutil.h)
-
-set(LEMON_UI_FORMS
-    ${LEMON_BASEDIR_UI}/forms/lemon.ui
-    ${LEMON_BASEDIR_UI}/forms/exttestcasemodifierdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/exttestcasemodifier.ui
-    ${LEMON_BASEDIR_UI}/forms/exttestcaseupdaterdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/taskeditwidget.ui
-    ${LEMON_BASEDIR_UI}/forms/testcaseeditwidget.ui
-    ${LEMON_BASEDIR_UI}/forms/generalsettings.ui
-    ${LEMON_BASEDIR_UI}/forms/compilersettings.ui
-    ${LEMON_BASEDIR_UI}/forms/addtestcaseswizard.ui
-    ${LEMON_BASEDIR_UI}/forms/judgingdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/optionsdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/detaildialog.ui
-    ${LEMON_BASEDIR_UI}/forms/newcontestwidget.ui
-    ${LEMON_BASEDIR_UI}/forms/opencontestwidget.ui
-    ${LEMON_BASEDIR_UI}/forms/newcontestdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/opencontestdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/visualmainsettings.ui
-    ${LEMON_BASEDIR_UI}/forms/visualsettings.ui
-    ${LEMON_BASEDIR_UI}/forms/themeeditdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/welcomedialog.ui
-    ${LEMON_BASEDIR_UI}/forms/addtaskdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/advancedcompilersettingsdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/environmentvariablesdialog.ui
-    ${LEMON_BASEDIR_UI}/forms/editvariabledialog.ui
-    ${LEMON_BASEDIR_UI}/forms/addcompilerwizard.ui
-    ${LEMON_BASEDIR_UI}/forms/statisticsbrowser.ui
-    )
+file(GLOB_RECURSE LEMON_QML_FILES CONFIGURE_DEPENDS ${LEMON_BASEDIR_UI}/qml/*.qml)
+foreach(qml_file IN LISTS LEMON_QML_FILES)
+    file(RELATIVE_PATH qml_name ${LEMON_BASEDIR_UI}/qml ${qml_file})
+    set_source_files_properties(${qml_file} PROPERTIES QT_RESOURCE_ALIAS ${qml_name})
+endforeach()

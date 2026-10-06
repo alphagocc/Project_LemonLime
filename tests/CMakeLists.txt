@@ -1,4 +1,8 @@
 add_subdirectory(test1)
+add_subdirectory(qml-ui)
+if(LEMON_UI_REFERENCE_SOURCE_DIR)
+    add_subdirectory(ui-reference)
+endif()
 if(WIN32)
     add_subdirectory(windows-sandbox)
     add_subdirectory(sleep-inhibitor)

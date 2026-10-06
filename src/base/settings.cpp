@@ -435,7 +435,7 @@ void Settings::copyFrom(Settings *other) {
 }
 
 void Settings::saveSettings() {
-	QSettings settings("LemonLime", "lemon");
+	QSettings settings(QSettings::defaultFormat(), QSettings::UserScope, "LemonLime", "lemon");
 	settings.setValue("UiLanguage", uiLanguage);
 	settings.beginGroup("GeneralSettings");
 	settings.setValue("DefaultFullScore", defaultFullScore);
@@ -549,7 +549,7 @@ void Settings::loadSettings() {
 	compilerList.clear();
 	colorThemeList.clear();
 	recentContest.clear();
-	QSettings settings("LemonLime", "lemon");
+	QSettings settings(QSettings::defaultFormat(), QSettings::UserScope, "LemonLime", "lemon");
 	uiLanguage = settings.value("UiLanguage", QLocale::system().name()).toString();
 	settings.beginGroup("GeneralSettings");
 	defaultFullScore = settings.value("DefaultFullScore", 10).toInt();
