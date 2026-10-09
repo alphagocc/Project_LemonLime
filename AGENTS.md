@@ -462,11 +462,15 @@ refactor: extract JSON serialization helpers to LemonUtils
 
 | 工作流                 | 说明                         |
 | ---------------------- | ---------------------------- |
-| `windows-qt6.yml`      | Windows MSVC + Qt 6.9.3 构建 |
+| `windows-qt6.yml`      | Windows MSVC + Qt 6.12.0 构建 |
 | `linux-static-qt6.yml` | Linux 静态链接 Qt6 构建      |
 | `macos-qt6.yml`        | macOS Qt6 构建               |
 | `cpack-deb-debian.yml` | Debian DEB 包构建            |
 | `check_format.yml`     | 代码格式检查（clang-format） |
+
+主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`。Windows、Linux 静态版、macOS 和 Debian 包共用 `.github/actions/artifact-name` 生成名称：`lemonlime-[version]-[win/linux/macos]-[x64/arm64]-[release/relwithdebinfo/debug]-qt[qt-version]-[commithash]`。版本号拼接 `makespec/VERSION` 与 `makespec/VERSIONSUFFIX`，Qt 完整版本由对应的 `qmake -query QT_VERSION` 获取，提交哈希使用 `git rev-parse --short HEAD`。Debian 文件名在提交哈希后追加 `-testing` 或 `-sid`，保留两种发行版构建。
+
+Windows 包保留 `.zip`，macOS 包保留 `.dmg`，Debian 包保留 `.deb`，Linux 静态可执行文件使用无扩展名名称。文件在上传前完成命名，Actions 使用 `actions/upload-artifact@v7` 的 `archive: false` 单文件模式，下载文件与 Release 资产采用同一名称。Release 上传条件检查 `github.ref` 的标签前缀，覆盖标签推送与 Release 发布事件。源码包和手册保留各自的命名约定。
 
 ### 文件编码
 
