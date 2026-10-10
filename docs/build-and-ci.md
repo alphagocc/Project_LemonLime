@@ -63,10 +63,19 @@ ctest --test-dir build --output-on-failure
 
 | 目录 | 覆盖范围 |
 | --- | --- |
-| `tests/test1/` | 比赛评测集成测试 |
+| `tests/integrated-test/` | CDF 往返、编译器配置兼容与比赛评测集成测试 |
 | `tests/windows-sandbox/` | Windows 隔离、句柄、权限复用、资源限制、取消及语言兼容 |
 | `tests/sleep-inhibitor/` | Windows 电源请求重复申请、嵌套释放及句柄回收 |
 | `unix/test/` | watcher 的测试配置与程序 |
+
+`integrated-test` 要求 `g++` 和 `python3` 或 `python` 位于 `PATH`，缺少工具会使评测测试失败。测试从源码目录读取样例，仅在评测时复制到临时目录，并在退出时恢复工作目录。CTest 总超时为 120 秒。单独构建和执行：
+
+```bash
+cmake --build build --target integrated-test
+ctest --test-dir build -R '^integrated-test$' --output-on-failure
+```
+
+测试精简的故障注入与消融记录见 [2026-10-10 集成测试验证](reviews/2026-10-10-integrated-test-ablation.md)。
 
 沙箱与休眠控制测试仅在 Windows 构建。沙箱测试使用本机 C、C++、Java、Python 工具，缺少对应工具时跳过该项。运行 Qt 测试前须使动态库可供加载，Windows CI 使用 `windeployqt` 准备测试依赖。macOS CI 中的测试步骤当前关闭，构建成功与测试通过须分别说明。
 
