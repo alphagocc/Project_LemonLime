@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Project LemonLime 是基于 Lemon 与 LemonPlus 的 OI 竞赛评测系统，支持 Windows、Linux 和 macOS，采用 C++17、Qt 6.8 及以上版本，许可证为 GPL-3.0-or-later。
+Project LemonLime 是基于 Lemon 与 LemonPlus 的 OI 竞赛评测系统，支持 Windows、Linux 和 macOS，采用 C++23、Qt 6.8 及以上版本，许可证为 GPL-3.0-or-later。
 
 ## 文档入口
 
@@ -32,7 +32,7 @@ Qt Test 测试由 CTest 执行。Windows 另含沙箱与休眠控制测试，语
 
 ## 共同约定
 
-1. 使用 C++17 和 `#pragma once`。代码按仓库 `.clang-format` 格式化，采用 Tab 缩进、110 列宽和 CRLF 行尾，源码保留 SPDX 许可证头。
+1. 使用 C++23 和 `#pragma once`。代码按仓库 `.clang-format` 格式化，采用 Tab 缩进、110 列宽和 CRLF 行尾，源码保留 SPDX 许可证头。
 2. 信号槽使用函数指针形式，重载信号使用 `qOverload<>()`。循环使用标准 C++ 范围 for，遵守 `QT_NO_FOREACH`。
 3. 类名使用 PascalCase，成员与方法使用无前缀 camelCase，访问器使用 `getXxx()` 与 `setXxx()`。保留现有 `Lemon` 命名空间及旧全局类的组织方式。
 4. QObject 优先由父子对象树管理。跨线程对象、Windows 句柄和权限资源的所有权遵循相应模块文档。
