@@ -53,6 +53,18 @@ Contest : QObject
 
 `JudgingController` 以 `moveToThread()` 将任务对象移到新线程，通过 `QMetaObject::invokeMethod()` 调用。结束时依次退出、等待并释放线程，再释放 `TaskJudger`。
 
+`Settings` 优先读取 `GeneralSettings/MaximumJudgingThreads` 中保存的设置。该项缺失时，由 `src/base/cputopology.cpp` 检测物理核心并计算默认值：同时具有 P-core 与 E-core 的处理器采用 P-core 数量；同构处理器采用全部物理核心数量的四分之三，向下取整且至少为 1。仅有 E-core 的处理器也按同构计算，例如 N100 的 4 个 E-core 对应 3 个评测线程。SMT 逻辑线程归属于同一个物理核心。
+
+| 平台 | 核心检测方式 |
+| --- | --- |
+| Windows | `GetLogicalProcessorInformationEx(RelationProcessorCore)` 统计物理核心，`EfficiencyClass` 的最高性能类别数量用于异构计算 |
+| macOS | `hw.physicalcpu` 统计物理核心，存在多个性能类别时读取 `hw.perflevel0.physicalcpu` |
+| Linux | sysfs 的同核兄弟清单合并逻辑线程，过滤离线 CPU；Intel 使用 `cpu_core/cpus` 识别 P-core，ARM 使用完整的 `cpu_capacity` 信息区分性能类别 |
+
+只有最高性能类别的核心数量介于 1 和全部物理核心数量之间时，才采用异构规则。核心类别信息缺失时按同构计算；物理核心信息缺失时，使用 `QThread::idealThreadCount()` 返回的逻辑处理器数计算四分之三，结果至少为 1。自动值仅控制并行评测数量，评测进程的 CPU 调度由操作系统负责。
+
+开启调试日志后，`CpuTopology` 模块记录核心检测来源、核心数量、分类结果、系统接口失败信息和默认线程数的计算依据；`Setting` 模块记录实际采用的线程数，以及该值来自保存的设置还是自动计算。
+
 `TaskJudger` 在复制测试文件和创建评测线程前检查测试点工作目录。创建失败时记录 `FileError` 与零分，报告目录错误，保持原有子任务依赖和后续独立子任务规则。普通模式与 Windows 沙箱模式共用该检查。
 
 `subtaskdependencelib.h` 使用 `stateToStatus()` 与 `statusToScore()` 计算子任务依赖得分，精度为百万分比，`maxDependValue = 1000000`。

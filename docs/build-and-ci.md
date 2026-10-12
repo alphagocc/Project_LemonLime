@@ -6,15 +6,15 @@
 
 CMake 最低版本为 3.16，C++ 编译器须支持 C++17。推荐使用 Ninja。Qt 要求 6.8 或更高，可通过 `LEMON_QT_MAJOR_VERSION` 指定主版本。
 
-| Qt 模块 | 用途 |
-| --- | --- |
-| Core、Gui、Widgets | 核心库和界面 |
-| Network | SingleApplication 单实例保护 |
-| Svg | SVG 图标插件 |
-| LinguistTools | 翻译编译 |
-| Test | Qt Test 测试 |
-| DBus | Linux 评测期间阻止系统休眠 |
-| AxContainer | Windows XLS 导出，按构建选项启用 |
+| Qt 模块            | 用途                             |
+| ------------------ | -------------------------------- |
+| Core、Gui、Widgets | 核心库和界面                     |
+| Network            | SingleApplication 单实例保护     |
+| Svg                | SVG 图标插件                     |
+| LinguistTools      | 翻译编译                         |
+| Test               | Qt Test 测试                     |
+| DBus               | Linux 评测期间阻止系统休眠       |
+| AxContainer        | Windows XLS 导出，按构建选项启用 |
 
 SingleApplication 和 spdlog 作为 Git 子模块位于 `3rdparty/`。源码获取与常规构建：
 
@@ -29,25 +29,27 @@ cmake --build build --parallel
 
 ## CMake 选项
 
-| 选项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `EMBED_TRANSLATIONS` | `ON` | 嵌入翻译文件 |
-| `EMBED_DOCS` | `ON` | 嵌入用户手册 |
-| `ENABLE_XLS_EXPORT` | `OFF` | Windows XLS 导出 |
-| `ENABLE_LTO` | `ON` | 链接时优化 |
-| `ENABLE_CCACHE` | `OFF` | ccache 编译缓存 |
-| `BUILD_DEB` | `OFF` | 构建 DEB 包 |
-| `BUILD_RPM` | `OFF` | 构建 RPM 包 |
-| `LEMON_QT_MAJOR_VERSION` | `6` | Qt 主版本 |
-| `LEMON_QT_MIN_VERSION` | `6.8` | 最低 Qt 版本 |
-| `LEMON_BUILD_INFO` | 空 | 自定义构建信息 |
-| `LEMON_CONFIG_DIR` | 空 | 自定义配置目录 |
+| 选项                     | 默认值 | 说明             |
+| ------------------------ | ------ | ---------------- |
+| `EMBED_TRANSLATIONS`     | `ON`   | 嵌入翻译文件     |
+| `EMBED_DOCS`             | `ON`   | 嵌入用户手册     |
+| `ENABLE_XLS_EXPORT`      | `OFF`  | Windows XLS 导出 |
+| `ENABLE_LTO`             | `ON`   | 链接时优化       |
+| `ENABLE_CCACHE`          | `OFF`  | ccache 编译缓存  |
+| `BUILD_DEB`              | `OFF`  | 构建 DEB 包      |
+| `BUILD_RPM`              | `OFF`  | 构建 RPM 包      |
+| `LEMON_QT_MAJOR_VERSION` | `6`    | Qt 主版本        |
+| `LEMON_QT_MIN_VERSION`   | `6.8`  | 最低 Qt 版本     |
+| `LEMON_BUILD_INFO`       | 空     | 自定义构建信息   |
+| `LEMON_CONFIG_DIR`       | 空     | 自定义配置目录   |
 
 应用版本由 [makespec/VERSION](../makespec/VERSION) 与 [makespec/VERSIONSUFFIX](../makespec/VERSIONSUFFIX) 拼接，构建版本取 `git rev-parse --short HEAD`。无法读取 Git 信息时，CMake 使用 `no-git`。
 
 ## 平台构建差异
 
 Windows CI 使用 MSVC，启用 XLS 导出时链接 Qt AxContainer。实验性 AppContainer 沙箱的运行要求见 [Windows 沙箱](windows-sandbox.md)。
+
+CPU 核心检测要求使用包含 `PROCESSOR_RELATIONSHIP::EfficiencyClass` 定义的 Windows 10 SDK 或更新版本。CMake 在配置阶段编译检查该字段和 `GetLogicalProcessorInformationEx`，并在 SDK 缺少这些声明时报告错误。API 声明要求 `_WIN32_WINNT >= 0x0601`；项目通过 Qt 的 `qt_windows.h` 使用 Qt 默认的 Windows 目标定义。系统接口从 Windows 7 开始提供，`EfficiencyClass` 的核心分类语义从 Windows 10 开始提供。
 
 Linux 链接 Qt DBus，并使用 `watcher_linux.cpp` 监控资源；默认栈空间与内存限制相同，推荐静态链接分发。macOS 链接 IOKit 与 CoreFoundation，并以 Objective-C++ 编译 `watcher_macos.mm`；Apple Silicon 的评测稳定性仍需针对目标环境验证。
 
@@ -61,12 +63,13 @@ Unix 构建将 `watcher_unix` 嵌入 `watcher.qrc`。主程序与 `lemon-base`�
 ctest --test-dir build --output-on-failure
 ```
 
-| 目录 | 覆盖范围 |
-| --- | --- |
-| `tests/integrated-test/` | CDF 往返、编译器配置兼容与比赛评测集成测试 |
-| `tests/windows-sandbox/` | Windows 隔离、句柄、权限复用、资源限制、取消及语言兼容 |
-| `tests/sleep-inhibitor/` | Windows 电源请求重复申请、嵌套释放及句柄回收 |
-| `unix/test/` | watcher 的测试配置与程序 |
+| 目录                     | 覆盖范围                                                                  |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `tests/integrated-test/` | CDF 往返、编译器配置兼容与比赛评测集成测试                                |
+| `tests/cpu-topology/`    | 默认评测线程策略、物理核心与 SMT 计数、Linux sysfs 核心类别和检测信息缺失 |
+| `tests/windows-sandbox/` | Windows 隔离、句柄、权限复用、资源限制、取消及语言兼容                    |
+| `tests/sleep-inhibitor/` | Windows 电源请求重复申请、嵌套释放及句柄回收                              |
+| `unix/test/`             | watcher 的测试配置与程序                                                  |
 
 `integrated-test` 要求 `g++` 和 `python3` 或 `python` 位于 `PATH`，缺少工具会使评测测试失败。测试从源码目录读取样例，仅在评测时复制到临时目录，并在退出时恢复工作目录。CTest 总超时为 120 秒。单独构建和执行：
 
@@ -83,13 +86,13 @@ ctest --test-dir build -R '^integrated-test$' --output-on-failure
 
 配置保存在 [.github/workflows](../.github/workflows)。
 
-| 文件 | 用途 |
-| --- | --- |
-| `windows-qt6.yml` | Windows MSVC 与 Qt 6.12.0 构建 |
-| `linux-static-qt6.yml` | Linux 静态 Qt6 构建 |
-| `macos-qt6.yml` | macOS Qt6，x64 与 arm64 构建 |
+| 文件                   | 用途                            |
+| ---------------------- | ------------------------------- |
+| `windows-qt6.yml`      | Windows MSVC 与 Qt 6.12.0 构建  |
+| `linux-static-qt6.yml` | Linux 静态 Qt6 构建             |
+| `macos-qt6.yml`        | macOS Qt6，x64 与 arm64 构建    |
 | `cpack-deb-debian.yml` | Debian testing 与 sid 的 DEB 包 |
-| `check_format.yml` | clang-format 检查 |
+| `check_format.yml`     | clang-format 检查               |
 
 四个主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`。源码包、用户手册与 watcher 另有专用配置。
 
@@ -103,11 +106,11 @@ lemonlime-[version]-[win/linux/macos]-[x64/arm64]-[release/relwithdebinfo/debug]
 
 项目版本取上述两个版本文件的拼接结果；Qt 完整版本由相应的 `qmake -query QT_VERSION` 获取；提交哈希取检出代码的短哈希。Debian 文件在提交哈希后追加 `-testing` 或 `-sid`，区分两个发行版的产物。
 
-| 产物 | 扩展名 |
-| --- | --- |
-| Windows 压缩包 | `.zip` |
-| macOS 磁盘映像 | `.dmg` |
-| Debian 软件包 | `.deb` |
+| 产物                 | 扩展名   |
+| -------------------- | -------- |
+| Windows 压缩包       | `.zip`   |
+| macOS 磁盘映像       | `.dmg`   |
+| Debian 软件包        | `.deb`   |
 | Linux 静态可执行文件 | 无扩展名 |
 
 打包后的实际文件、Actions 下载文件和 Release 资产使用同一名称。Actions 采用 `actions/upload-artifact@v7` 的 `archive: false` 单文件模式；Release 上传检查 `github.ref` 的标签前缀，覆盖标签推送与 Release 发布事件。重复发布允许覆盖同名资产。源码包和手册保留各自的命名约定。
