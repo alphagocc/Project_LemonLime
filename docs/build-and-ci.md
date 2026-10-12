@@ -4,7 +4,9 @@
 
 ## 依赖与构建
 
-CMake 最低版本为 3.16，C++ 编译器须支持 C++17。推荐使用 Ninja。Qt 要求 6.8 或更高，可通过 `LEMON_QT_MAJOR_VERSION` 指定主版本。
+CMake 最低版本为 3.20，C++ 编译器须支持 C++23。推荐使用 Ninja。Qt 要求 6.8 或更高，可通过 `LEMON_QT_MAJOR_VERSION` 指定主版本。
+
+主程序与独立 watcher 测试均设置 `CMAKE_CXX_STANDARD=23` 并要求对应标准模式。CMake 根据编译器版本选择标准参数；MSVC 可能使用 `/std:c++latest`。具体语言和标准库特性的可用范围仍取决于编译器、标准库和目标系统版本。
 
 | Qt 模块            | 用途                             |
 | ------------------ | -------------------------------- |
@@ -47,7 +49,9 @@ cmake --build build --parallel
 
 ## 平台构建差异
 
-Windows CI 使用 MSVC，启用 XLS 导出时链接 Qt AxContainer。实验性 AppContainer 沙箱的运行要求见 [Windows 沙箱](windows-sandbox.md)。
+Windows CI 使用 MSVC，分别在 `windows-latest` 和 `windows-11-arm` 上构建 x64 与 ARM64。Qt 使用对应的 `win64_msvc2022_64` 和 `win64_msvc2022_arm64` 工具包；ARM64 安装来源为 `windows_arm64`。两种架构均启用 XLS 导出并链接 Qt AxContainer。实验性 AppContainer 沙箱的运行要求见 [Windows 沙箱](windows-sandbox.md)。
+
+Ubuntu ARM64 CI 使用 `ubuntu-26.04-arm`，安装 Ubuntu 26.04 提供的 GCC 与 Qt 开发包，以原生编译生成 DEB。包安装前缀为 `/usr`，CPack 通过 `dpkg-shlibdeps` 补充共享库依赖，并在上传前检查包架构为 `arm64`。
 
 CPU 核心检测要求使用包含 `PROCESSOR_RELATIONSHIP::EfficiencyClass` 定义的 Windows 10 SDK 或更新版本。CMake 在配置阶段编译检查该字段和 `GetLogicalProcessorInformationEx`，并在 SDK 缺少这些声明时报告错误。API 声明要求 `_WIN32_WINNT >= 0x0601`；项目通过 Qt 的 `qt_windows.h` 使用 Qt 默认的 Windows 目标定义。系统接口从 Windows 7 开始提供，`EfficiencyClass` 的核心分类语义从 Windows 10 开始提供。
 
@@ -80,7 +84,7 @@ ctest --test-dir build -R '^integrated-test$' --output-on-failure
 
 测试精简的故障注入与消融记录见 [2026-10-10 集成测试验证](reviews/2026-10-10-integrated-test-ablation.md)。
 
-沙箱与休眠控制测试仅在 Windows 构建。沙箱测试使用本机 C、C++、Java、Python 工具，缺少对应工具时跳过该项。运行 Qt 测试前须使动态库可供加载，Windows CI 使用 `windeployqt` 准备测试依赖。macOS CI 中的测试步骤当前关闭，构建成功与测试通过须分别说明。
+沙箱与休眠控制测试仅在 Windows 构建。沙箱测试使用本机 C、C++、Java、Python 工具，缺少对应工具时跳过该项。运行 Qt 测试前须使动态库可供加载，Windows CI 使用 `windeployqt` 为每个 Qt 测试程序准备依赖。Windows ARM64 的主程序、测试程序和 Python 均为 ARM64，C++ 评测样例使用 runner 提供的 x64 MinGW，通过 Windows 仿真执行。Ubuntu ARM64 执行主项目 CTest 后生成 DEB。macOS CI 中的测试步骤当前关闭，构建成功与测试通过须分别说明。
 
 ## CI 配置
 
@@ -88,23 +92,24 @@ ctest --test-dir build -R '^integrated-test$' --output-on-failure
 
 | 文件                   | 用途                            |
 | ---------------------- | ------------------------------- |
-| `windows-qt6.yml`      | Windows MSVC 与 Qt 6.12.0 构建  |
+| `windows-qt6.yml`      | Windows x64 与 ARM64，MSVC 与 Qt 6.12.0 构建 |
 | `linux-static-qt6.yml` | Linux 静态 Qt6 构建             |
 | `macos-qt6.yml`        | macOS Qt6，x64 与 arm64 构建    |
 | `cpack-deb-debian.yml` | Debian testing 与 sid 的 DEB 包 |
+| `cpack-deb-ubuntu-arm64.yml` | Ubuntu 26.04 ARM64 的 DEB 包 |
 | `check_format.yml`     | clang-format 检查               |
 
-四个主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`。源码包、用户手册与 watcher 另有专用配置。
+五个主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`。源码包、用户手册与 watcher 另有专用配置。
 
 ## 产物命名与上传
 
-四个主程序 CI 共用 [.github/actions/artifact-name](../.github/actions/artifact-name/action.yml) 生成名称：
+五个主程序 CI 共用 [.github/actions/artifact-name](../.github/actions/artifact-name/action.yml) 生成名称：
 
 ```text
 lemonlime-[version]-[win/linux/macos]-[x64/arm64]-[release/relwithdebinfo/debug]-qt[qt-version]-[commithash]
 ```
 
-项目版本取上述两个版本文件的拼接结果；Qt 完整版本由相应的 `qmake -query QT_VERSION` 获取；提交哈希取检出代码的短哈希。Debian 文件在提交哈希后追加 `-testing` 或 `-sid`，区分两个发行版的产物。
+项目版本取上述两个版本文件的拼接结果；Qt 完整版本由相应的 `qmake -query QT_VERSION` 获取；提交哈希取检出代码的短哈希。Debian 文件在提交哈希后追加 `-testing` 或 `-sid`，Ubuntu ARM64 文件追加 `-ubuntu-26.04`，区分发行版的产物。
 
 | 产物                 | 扩展名   |
 | -------------------- | -------- |

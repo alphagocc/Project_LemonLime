@@ -4,7 +4,7 @@
 
 ## C++ 格式与命名
 
-项目使用 C++17，关闭编译器语言扩展；头文件统一使用 `#pragma once`。格式以 [.clang-format](../.clang-format) 为准：
+项目使用 C++23，关闭编译器语言扩展；头文件统一使用 `#pragma once`。新增语言和标准库特性须兼容 CI 中的 GCC、MSVC 与 AppleClang，并满足目标系统版本要求。格式以 [.clang-format](../.clang-format) 为准：
 
 ```yaml
 BasedOnStyle: LLVM
