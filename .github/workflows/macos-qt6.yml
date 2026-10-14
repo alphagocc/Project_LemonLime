@@ -17,6 +17,7 @@ jobs:
     name: Build
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest]
         build_type: [Release, RelWithDebInfo, Debug]
