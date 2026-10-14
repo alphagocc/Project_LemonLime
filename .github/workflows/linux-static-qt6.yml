@@ -77,7 +77,7 @@ jobs:
           platform: linux
           arch: x64
           build-type: ${{ matrix.build_type }}
-          qmake: ../qt6/bin/qmake
+          qmake: ../qt6/bin/bin/qmake
       - name: Build
         run: |
           cd ..
