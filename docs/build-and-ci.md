@@ -53,6 +53,8 @@ Windows CI 使用 MSVC，分别在 `windows-latest` 和 `windows-11-arm` 上构�
 
 Ubuntu ARM64 CI 使用 `ubuntu-26.04-arm`，安装 Ubuntu 26.04 提供的 GCC 与 Qt 开发包，以原生编译生成 DEB。包安装前缀为 `/usr`，CPack 通过 `dpkg-shlibdeps` 补充共享库依赖，并在上传前检查包架构为 `arm64`。
 
+Debian 与 Linux 静态构建使用容器，在 checkout 后将 `$GITHUB_WORKSPACE` 加入容器用户的 Git `safe.directory`。checkout 自身的信任设置使用临时配置，后续产物命名与 CMake 获取提交哈希时需要容器用户的配置。
+
 CPU 核心检测要求使用包含 `PROCESSOR_RELATIONSHIP::EfficiencyClass` 定义的 Windows 10 SDK 或更新版本。CMake 在配置阶段编译检查该字段和 `GetLogicalProcessorInformationEx`，并在 SDK 缺少这些声明时报告错误。API 声明要求 `_WIN32_WINNT >= 0x0601`；项目通过 Qt 的 `qt_windows.h` 使用 Qt 默认的 Windows 目标定义。系统接口从 Windows 7 开始提供，`EfficiencyClass` 的核心分类语义从 Windows 10 开始提供。
 
 Linux 链接 Qt DBus，并使用 `watcher_linux.cpp` 监控资源；默认栈空间与内存限制相同，推荐静态链接分发。macOS 链接 IOKit 与 CoreFoundation，并以 Objective-C++ 编译 `watcher_macos.mm`；Apple Silicon 的评测稳定性仍需针对目标环境验证。
@@ -99,7 +101,7 @@ ctest --test-dir build -R '^integrated-test$' --output-on-failure
 | `cpack-deb-ubuntu-arm64.yml` | Ubuntu 26.04 ARM64 的 DEB 包 |
 | `check_format.yml`     | clang-format 检查               |
 
-五个主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`。源码包、用户手册与 watcher 另有专用配置。
+五个主程序 CI 均构建 `Release`、`RelWithDebInfo` 和 `Debug`，构建矩阵设置 `fail-fast: false`，单项失败时其余任务继续执行。源码包、用户手册与 watcher 另有专用配置。
 
 ## 产物命名与上传
 
