@@ -81,7 +81,7 @@ QObject 优先由父子对象树管理。`JudgingController` 显式管理 `QThre
 #define WRITE_JSON(json, x) Lemon::writeJson(x, #x, json)
 ```
 
-底层通过 SFINAE 和 `std::enable_if_t` 支持数值、字符串、JSON 数组、QList、自定义枚举等类型。
+底层通过 C++20 concepts 和约束重载支持数值、字符串、JSON 数组、QList、自定义枚举等类型。
 
 每个使用日志的 `.cpp` 定义 `LEMON_MODULE_NAME`，再调用项目宏：
 
