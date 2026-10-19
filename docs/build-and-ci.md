@@ -61,6 +61,8 @@ Linux 链接 Qt DBus，并使用 `watcher_linux.cpp` 监控资源；默认栈空
 
 Unix 构建将 `watcher_unix` 嵌入 `watcher.qrc`。主程序与 `lemon-base`、`lemon-core` 共用 `src/pch.h` 中的 QtCore、QtGui 预编译头。界面和资源组织见 [编码约定](coding-conventions.md)。
 
+基础层和核心层的源文件仅在对应静态库中编译，主程序链接这两个库。启用 `ENABLE_LTO` 且编译器支持时，主程序和两个库均启用 IPO，保持跨层优化。`integrated-test` 复用 `lemon-core` 的预编译头，并同步其 IPO 设置以保持编译选项兼容。
+
 ## 测试
 
 测试框架为 Qt Test，通过 CTest 执行：

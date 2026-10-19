@@ -23,7 +23,7 @@ LemonLime 采用 Qt 桌面界面、核心评测逻辑与基础设施三层结构
 | `makespec/` | 版本号与打包配置 |
 | `.github/workflows/` | CI 配置 |
 
-主可执行文件 `lemon` 包含界面层，链接 `lemon-core` 与 `lemon-base`；`lemon-core` 依赖 `lemon-base`。
+主可执行文件 `lemon` 编译界面层和应用资源，链接 `lemon-core` 与 `lemon-base`；`lemon-core` 依赖 `lemon-base`。基础层和核心层的源文件及 moc 生成代码分别由对应静态库编译一次，主程序和测试通过链接复用。
 
 界面层的主要类包括 `LemonLime`、`JudgingDialog`、`ResultViewer` 与 `SummaryTree`；核心层包括 `Contest`、`Task`、`Contestant`、`TaskJudger`、`JudgingThread` 与 `JudgingController`；基础层包括 `Settings`、`Compiler`、`LemonLog` 与 `LemonConfig`。
 
