@@ -55,6 +55,8 @@ Contest : QObject
 
 GUI 的模态评测窗口阻止题目、测试点、设置和编译器配置的编辑，`Contest::judge()` 返回前保持这些对象的生命周期，worker 通过 const 接口访问配置。当前同步评测入口保留局部 `QEventLoop`，全部任务完成并应用结果后退出，调用方随后显示完成通知并释放对话框。
 
+`Task::writeToJson()` 和 `TestCase::writeToJson()` 为 const 成员函数。自动保存遍历题目配置与测试点列表时使用只读容器接口；文件名规范化在局部副本中进行，避免序列化触发共享配置容器的数据分离。
+
 停止操作清理等待队列，对仍在执行的 future 调用 `cancel()`。`TaskJudger`、`CaseJudger` 与 `ProcessRunner` 持有同一共享状态的 `QFuture<void>`，编译等待、进程监控和内置结果比较均检查取消状态，执行线程无需通过 `processEvents()` 接收停止请求。各执行器负责进程终止和资源清理，任务函数返回后 future 报告 `finished`；控制器据此判断整场结束并释放休眠控制。取消任务保留此前成绩数据，并将评测完成标志设为 false；尚未分派的任务保持原结果和标志。
 
 普通文本比较在评测循环中检查取消，`BufferedStreamReader` 仅负责读取文件。外部 diff 沿用 `QProcess::execute()` 同步等待，正在执行的 diff 完成后，任务层再处理取消请求。
@@ -80,6 +82,8 @@ GUI 的模态评测窗口阻止题目、测试点、设置和编译器配置的�
 ## 进程执行
 
 Linux 和 macOS 生成独立的 `watcher_unix`，分别组合 `watcher_unix.cpp` 与 `watcher_linux.cpp` 或 `watcher_macos.mm`，负责被评测程序的时间和内存监控。生成文件嵌入 `watcher.qrc` 后交由主程序使用。
+
+`UnixProcessRunner::run()` 使用函数作用域内的 `QProcess` 对象，正常返回及提前返回均由析构函数释放进程对象；取消和超时继续先终止 watcher 并等待退出。
 
 Windows 的普通执行与实验性 AppContainer 执行共用 `WinProcessRunner::run()`。配置、进程限制、权限会话与资源计量集中记录在 [Windows 沙箱](windows-sandbox.md)。
 
