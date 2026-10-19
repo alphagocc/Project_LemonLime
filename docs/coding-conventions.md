@@ -68,7 +68,7 @@ connect(ui->comparisonMode, qOverload<int>(&QComboBox::currentIndexChanged), thi
         &TaskEditWidget::comparisonModeChanged);
 ```
 
-QObject 优先由父子对象树管理。`JudgingController` 显式管理 `QThread` 与 `TaskJudger`，释放前先退出并等待线程；`LemonTranslator` 使用 `std::unique_ptr<QTranslator>`，spdlog logger 使用 `std::shared_ptr`。`TestCase` 为普通类，由 `QList<TestCase*>` 保存。
+QObject 优先由父子对象树管理。`JudgingController` 持有专用线程池，作为 `TaskJudger` 与 `QFutureWatcher` 的父对象；任务完成后在 GUI 线程释放任务对象，控制器析构时取消并等待运行任务退出。同步 `CaseJudger` 与其进程资源属于执行它的 worker。`LemonTranslator` 使用 `std::unique_ptr<QTranslator>`，spdlog logger 使用 `std::shared_ptr`。`TestCase` 为普通类，由 `QList<TestCase*>` 保存。
 
 线程调度见 [项目架构](architecture.md)，Windows 资源所有权见 [Windows 沙箱](windows-sandbox.md)。
 

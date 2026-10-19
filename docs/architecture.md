@@ -25,7 +25,7 @@ LemonLime 采用 Qt 桌面界面、核心评测逻辑与基础设施三层结构
 
 主可执行文件 `lemon` 编译界面层和应用资源，链接 `lemon-core` 与 `lemon-base`；`lemon-core` 依赖 `lemon-base`。基础层和核心层的源文件及 moc 生成代码分别由对应静态库编译一次，主程序和测试通过链接复用。
 
-界面层的主要类包括 `LemonLime`、`JudgingDialog`、`ResultViewer` 与 `SummaryTree`；核心层包括 `Contest`、`Task`、`Contestant`、`TaskJudger`、`JudgingThread` 与 `JudgingController`；基础层包括 `Settings`、`Compiler`、`LemonLog` 与 `LemonConfig`。
+界面层的主要类包括 `LemonLime`、`JudgingDialog`、`ResultViewer` 与 `SummaryTree`；核心层包括 `Contest`、`Task`、`Contestant`、`TaskJudger`、`CaseJudger` 与 `JudgingController`；基础层包括 `Settings`、`Compiler`、`LemonLog` 与 `LemonConfig`。
 
 ## 数据模型
 
@@ -45,13 +45,19 @@ Contest : QObject
 
 ## 评测与线程
 
-1. `Contest::judge()` 创建 `TaskJudger`，提交给 `JudgingController`。
-2. `JudgingController` 使用 `QThread` 和 `QQueue` 管理并行任务，并发数量受 `maxJudgingThreads` 控制。
-3. `TaskJudger` 编译源代码，并为各测试点创建 `JudgingThread`。
-4. `JudgingThread` 重写 `QThread::run()`，运行提交程序并比较输出。
-5. 评测结果通过逐级信号传递至界面。
+1. `Contest::judge()` 为每个选手与题目的组合创建 `TaskJudger`，提交给 `JudgingController`。
+2. `JudgingController` 使用专用 `QThreadPool` 和 `QtConcurrent::run()` 的 promise 模式分派任务，并发数量受 `maxJudgingThreads` 控制，其余任务保留在等待队列。
+3. `TaskJudger` 在线程池中编译源代码，随后通过同步 `CaseJudger::run()` 顺序执行测试点和重测，保留子任务依赖及失败后的跳过规则。
+4. `TaskJudger::judgeIt()` 返回完整 `TaskResult`，由 `QPromise<TaskResult>` 发布至对应的 `QFuture<TaskResult>`。
+5. GUI 线程中的 `QFutureWatcher` 收到完成通知后调用 `Contestant::applyResult()`，整组结果更新完成后才发送成绩刷新信号。逐测试点事件通过携带值数据的排队信号传递。
 
-`JudgingController` 以 `moveToThread()` 将任务对象移到新线程，通过 `QMetaObject::invokeMethod()` 调用。结束时依次退出、等待并释放线程，再释放 `TaskJudger`。
+`TaskJudger` 与 watcher 由 GUI 线程的控制器管理。任务对象在提交前完成配置，执行期间其可变字段仅由一个 worker 访问；future 完成后由 GUI 释放对象及临时目录。worker 仅保存选手名称，成绩容器始终由 GUI 线程访问。`CaseJudger` 为普通同步执行类，进程对象在执行它的 worker 内创建和销毁。
+
+GUI 的模态评测窗口阻止题目、测试点、设置和编译器配置的编辑，`Contest::judge()` 返回前保持这些对象的生命周期，worker 通过 const 接口访问配置。当前同步评测入口保留局部 `QEventLoop`，全部任务完成并应用结果后退出，调用方随后显示完成通知并释放对话框。
+
+停止操作清理等待队列，对仍在执行的 future 调用 `cancel()`。`TaskJudger`、`CaseJudger` 与 `ProcessRunner` 持有同一共享状态的 `QFuture<void>`，编译等待、进程监控和内置结果比较均检查取消状态，执行线程无需通过 `processEvents()` 接收停止请求。各执行器负责进程终止和资源清理，任务函数返回后 future 报告 `finished`；控制器据此判断整场结束并释放休眠控制。取消任务保留此前成绩数据，并将评测完成标志设为 false；尚未分派的任务保持原结果和标志。
+
+普通文本比较在评测循环中检查取消，`BufferedStreamReader` 仅负责读取文件。外部 diff 沿用 `QProcess::execute()` 同步等待，正在执行的 diff 完成后，任务层再处理取消请求。
 
 `Settings` 优先读取 `GeneralSettings/MaximumJudgingThreads` 中保存的设置。该项缺失时，由 `src/base/cputopology.cpp` 检测物理核心并计算默认值：同时具有 P-core 与 E-core 的处理器采用 P-core 数量；同构处理器采用全部物理核心数量的四分之三，向下取整且至少为 1。仅有 E-core 的处理器也按同构计算，例如 N100 的 4 个 E-core 对应 3 个评测线程。SMT 逻辑线程归属于同一个物理核心。
 
@@ -65,7 +71,7 @@ Contest : QObject
 
 开启调试日志后，`CpuTopology` 模块记录核心检测来源、核心数量、分类结果、系统接口失败信息和默认线程数的计算依据；`Setting` 模块记录实际采用的线程数，以及该值来自保存的设置还是自动计算。
 
-`TaskJudger` 在复制测试文件和创建评测线程前检查测试点工作目录。创建失败时记录 `FileError` 与零分，报告目录错误，保持原有子任务依赖和后续独立子任务规则。普通模式与 Windows 沙箱模式共用该检查。
+`TaskJudger` 在复制测试文件和运行测试点前检查工作目录。创建失败时记录 `FileError` 与零分，报告目录错误，保持原有子任务依赖和后续独立子任务规则。普通模式与 Windows 沙箱模式共用该检查。
 
 `subtaskdependencelib.h` 使用 `stateToStatus()` 与 `statusToScore()` 计算子任务依赖得分，精度为百万分比，`maxDependValue = 1000000`。
 

@@ -11,6 +11,7 @@ CMake 最低版本为 3.20，C++ 编译器须支持 C++23。推荐使用 Ninja�
 | Qt 模块            | 用途                             |
 | ------------------ | -------------------------------- |
 | Core、Gui、Widgets | 核心库和界面                     |
+| Concurrent         | 线程池评测任务与 QFuture         |
 | Network            | SingleApplication 单实例保护     |
 | Svg                | SVG 图标插件                     |
 | LinguistTools      | 翻译编译                         |
@@ -74,6 +75,7 @@ ctest --test-dir build --output-on-failure
 | 目录                     | 覆盖范围                                                                  |
 | ------------------------ | ------------------------------------------------------------------------- |
 | `tests/integrated-test/` | CDF 往返、编译器配置兼容与比赛评测集成测试                                |
+| `tests/judging-controller/` | 并发上限、GUI 结果应用、空批次、重复评测及取消后的进程与任务清理 |
 | `tests/cpu-topology/`    | 默认评测线程策略、物理核心与 SMT 计数、Linux sysfs 核心类别和检测信息缺失 |
 | `tests/windows-sandbox/` | Windows 隔离、句柄、权限复用、资源限制、取消及语言兼容                    |
 | `tests/sleep-inhibitor/` | Windows 电源请求重复申请、嵌套释放及句柄回收                              |
@@ -85,6 +87,8 @@ ctest --test-dir build --output-on-failure
 cmake --build build --target integrated-test
 ctest --test-dir build -R '^integrated-test$' --output-on-failure
 ```
+
+整场评测样例分别使用 1 个和 3 个并行任务，核对相同的预期结果及 GUI 线程中的完成通知。`judging-controller` 使用测试程序自身的辅助进程模式验证实际并发、取消和进程退出，避免依赖额外的编译器。
 
 测试精简的故障注入与消融记录见 [2026-10-10 集成测试验证](reviews/2026-10-10-integrated-test-ablation.md)。
 
