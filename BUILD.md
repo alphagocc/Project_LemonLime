@@ -96,6 +96,8 @@ ninja
 
 ```
 
+使用 GCC 和静态 Qt 构建 Linux 便携版时，在 CMake 配置命令中加入 `-DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"`。这样主程序 `lemon` 和内嵌的评测监控器 `watcher_unix` 都使用静态 GCC 运行库。
+
 Ubuntu 26.04 ARM64 可使用系统 Qt 开发包生成 DEB，CI 使用同名 ARM64 runner：
 
 ```bash
